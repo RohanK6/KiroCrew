@@ -107,6 +107,12 @@ BENIGN_SPAWNS: frozenset[str] = frozenset(
     {
         "acp/runtime.py::_get_rss_mb",
         "acp/runtime.py::_get_rss_tree_mb",
+        # Diagnostics support-bundle version probe: fixed argv
+        # ``["kiro-cli", "--version"]`` with a 5s timeout, no shell, no cwd, and
+        # no agent-influenced args — it only stamps the collected kiro-cli
+        # version into versions.txt. The binary name is a module constant; a
+        # resource ceiling / sandbox adds nothing to a `--version` call.
+        "diagnostics.py::_kiro_cli_version",
         "apps/backend.py::_proc_start_time",
         "apps/backend.py::_resolve_nvm_path",
         "apps/backend.py::stop_app_backend",

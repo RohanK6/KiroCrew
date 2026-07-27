@@ -237,7 +237,7 @@ def _doctor_model_url_reachable(issues: list[str]) -> None:
         print("               keep retrying with backoff on every gateway boot.")
 
 
-def _doctor(platform_boot_error: "Exception | None" = None) -> None:
+def _doctor(platform_boot_error: "Exception | None" = None, bundle: bool = False) -> None:
     """Verify KiroCrew setup — check dependencies, config, credentials, connectivity.
 
     ``platform_boot_error`` carries a :class:`PlatformCompositionError` from
@@ -249,6 +249,26 @@ def _doctor(platform_boot_error: "Exception | None" = None) -> None:
 
     print("Kiro Crew Doctor 👻\n")
     issues: list[str] = []
+
+    # ── Diagnostics bundle (--bundle) ──
+    # Short-circuit: collect logs + crash reports into a redacted zip and print
+    # the local path plus a pre-filled GitHub issue URL, then exit. Shares the
+    # exact collector the dashboard "Report a Problem" button uses.
+    if bundle:
+        from kiro_crew import diagnostics
+
+        print("Collecting diagnostics bundle (secrets are redacted)...\n")
+        result = diagnostics.collect_bundle()
+        print(f"  ✅ bundle: {result.zip_path}")
+        print(
+            f"     {len(result.included)} file(s) · "
+            f"{result.total_redactions} secret(s) redacted"
+        )
+        if result.skipped:
+            print(f"     skipped (not found): {', '.join(result.skipped)}")
+        print("\n  Open a pre-filled GitHub issue (then drag the zip in):")
+        print(f"  {result.github_issue_url}")
+        return
 
     # ── Platform edition ──
     # Report the composed profile, and surface a boot-composition failure as a
