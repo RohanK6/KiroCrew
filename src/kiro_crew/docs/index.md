@@ -49,6 +49,7 @@ agent backend and Slack credentials.
 |---------|-------------|
 | App Kit | Build and distribute apps that run inside KiroCrew (App Store, SDK, manifest) |
 | [Web Deploy](deploy-web.md) | Publish artifacts to a public HTTPS URL on your own AWS (private S3 + CloudFront + OAC) |
+| [Inbound Webhooks](inbound-webhooks.md) | Let an external system trigger an agent turn over HTTP — named tokens, HMAC request signing, a reversible off switch, ephemeral sessions, `register_hook` resume context |
 | Snapshot & Restore | Portable backup/restore of KiroCrew state for machine migration |
 | Eval Harness | Multi-session evaluation framework for testing agent behavior |
 | Autonudge | Reactive same-session self-nudge for autonomous goal loops |
