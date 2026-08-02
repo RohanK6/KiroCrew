@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { Zap, RotateCcw, FolderOpen, ChevronRight, TriangleAlert } from 'lucide-react'
+import { Zap, RotateCcw, Folder, FolderOpen, ChevronRight, TriangleAlert } from 'lucide-react'
 import Modal from './Modal'
 import { Input, Btn } from './ui'
 import ProjectPicker from './ProjectPicker'
-import { FOLDER_EMOJIS, isSingleEmoji } from './folderEmoji'
+import { FOLDER_LUCIDE_ICONS, LUCIDE_ICON_PREFIX, folderIconLabel, lucideFolderIcon } from './folderIconCatalog'
 import { useImeGuard } from '../hooks/useImeGuard'
 import { resolveFolderProjectDir } from '../utils/folderAgent'
 import { ChatFolder } from '../types'
@@ -81,8 +81,6 @@ export default function FolderConfigModal({
 }: Props) {
   const [draft, setDraft] = useState<FolderConfigDraft>(EMPTY)
   const [emojiOpen, setEmojiOpen] = useState(false)
-  const [iconErr, setIconErr] = useState(false)
-  const [customEmoji, setCustomEmoji] = useState('')
   const [pickerOpen, setPickerOpen] = useState(false)
   // The backend rejects a free-typed project_dir (not absolute / not an existing
   // directory / sensitive path) and a multi-emoji icon with a 400. Submit used to
@@ -128,7 +126,7 @@ export default function FolderConfigModal({
       : EMPTY
     setDraft(seeded)
     seedRef.current = seeded
-    setEmojiOpen(false); setIconErr(false); setCustomEmoji(''); setPickerOpen(false)
+    setEmojiOpen(false); setPickerOpen(false)
     setSaving(false); setSaveErr('')
   }, [open, mode, seedKey])
 
@@ -171,18 +169,8 @@ export default function FolderConfigModal({
 
   const submit = useCallback(async () => {
     if (!canSubmit || saving) return
-    // A typed-but-not-Entered custom emoji used to be dropped on the floor: the
-    // field only applied it from its own Enter handler, so typing 🦄 and clicking
-    // "Create folder" shipped the auto icon with no feedback. Fold it in here —
-    // and if it isn't a single emoji, say so rather than silently ignoring it.
-    let icon = draft.icon
-    let regenerateIcon = draft.regenerateIcon
-    const typed = customEmoji.trim()
-    if (typed) {
-      if (!isSingleEmoji(typed)) { setIconErr(true); setEmojiOpen(true); return }
-      icon = typed
-      regenerateIcon = false
-    }
+    const icon = draft.icon
+    const regenerateIcon = draft.regenerateIcon
     const seeded = seedRef.current
     const edited: FolderConfigField[] = []
     if (trimmedName !== seeded.name) edited.push('name')
@@ -198,19 +186,16 @@ export default function FolderConfigModal({
     } finally {
       setSaving(false)
     }
-  }, [canSubmit, saving, draft, trimmedName, customEmoji, onSubmit])
+  }, [canSubmit, saving, draft, trimmedName, onSubmit])
 
-  // Clearing `customEmoji` here is load-bearing, not tidiness: submit() folds a
-  // non-empty value in, so a leftover typed emoji would outrank whatever the user
-  // picked afterwards from the grid (or a Reset back to auto) and persist the
-  // wrong icon.
-  const chooseEmoji = (em: string) => {
-    setDraft(d => ({ ...d, icon: em, regenerateIcon: false }))
-    setCustomEmoji('')
-    setIconErr(false)
+  const chooseIcon = (val: string) => {
+    setDraft(d => ({ ...d, icon: val, regenerateIcon: false }))
   }
 
-  const glyph = draft.icon || '🗂️'
+  // Glyph preview: a curated lucide badge for lucide:<name> values, the raw
+  // text for a legacy emoji still on an unmigrated folder, and a plain Folder
+  // outline when empty (auto).
+  const GlyphBadge = lucideFolderIcon(draft.icon)
 
   // The inline input this replaced held ONE field; the modal holds four, so an
   // accidental backdrop graze now costs real work. Guard the accidental paths
@@ -218,7 +203,7 @@ export default function FolderConfigModal({
   const seed = seedRef.current
   const touched: FolderConfigField[] = []
   if (draft.name !== seed.name) touched.push('name')
-  if (draft.icon !== seed.icon || !!customEmoji.trim()) touched.push('icon')
+  if (draft.icon !== seed.icon) touched.push('icon')
   if (draft.projectDir !== seed.projectDir) touched.push('projectDir')
   if (draft.defaultAgent !== seed.defaultAgent) touched.push('defaultAgent')
   const isDirty = touched.length > 0 || draft.regenerateIcon !== seed.regenerateIcon
@@ -278,7 +263,7 @@ export default function FolderConfigModal({
               onClick={() => setEmojiOpen(o => !o)}
               className="relative shrink-0 w-11 h-11 grid place-items-center text-[20px] leading-none rounded-[10px] bg-bg-elevated border border-dashed border-border-strong cursor-pointer transition-colors hover:border-accent hover:bg-accent-subtle"
             >
-              {glyph}
+              {GlyphBadge ? <GlyphBadge size={20} strokeWidth={2.25} /> : draft.icon ? draft.icon : <Folder size={20} className="text-muted" />}
               {!draft.icon && (
                 <span className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 px-1 text-[10px] leading-[1.3] rounded-full bg-card border border-border text-muted">
                   {i18nT('components.folderConfigModal.auto')}
@@ -311,42 +296,28 @@ export default function FolderConfigModal({
                   type="button"
                   data-testid="folder-config-icon-reset"
                   className="ml-auto flex items-center gap-1 text-[11px] text-muted hover:text-accent bg-transparent border-none cursor-pointer p-0"
-                  onClick={() => { setDraft(d => ({ ...d, icon: '', regenerateIcon: mode === 'edit' })); setCustomEmoji(''); setIconErr(false) }}
+                  onClick={() => { setDraft(d => ({ ...d, icon: '', regenerateIcon: mode === 'edit' })) }}
                 >
                   <RotateCcw size={11} /> {i18nT('components.folderConfigModal.reset_to_auto')}
                 </button>
               </div>
               <div className="grid grid-cols-8 gap-0.5">
-                {FOLDER_EMOJIS.map(em => (
-                  <button
-                    key={em}
-                    type="button"
-                    aria-label={`${i18nT('components.folderConfigModal.icon')} ${em}`}
-                    aria-pressed={draft.icon === em}
-                    onClick={() => chooseEmoji(em)}
-                    className={`h-7 flex items-center justify-center rounded cursor-pointer bg-transparent border-none text-[15px] leading-none hover:bg-bg-hover ${draft.icon === em ? 'bg-accent-subtle ring-1 ring-accent' : ''}`}
-                  >{em}</button>
-                ))}
+                {Object.entries(FOLDER_LUCIDE_ICONS).map(([name, Icon]) => {
+                  const val = `${LUCIDE_ICON_PREFIX}${name}`
+                  const label = folderIconLabel(name)
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      title={i18nT('components.folderConfigModal.set_icon_to_name', { name: label })}
+                      aria-label={i18nT('components.folderConfigModal.set_icon_to_name', { name: label })}
+                      aria-pressed={draft.icon === val}
+                      onClick={() => chooseIcon(val)}
+                      className={`h-7 flex items-center justify-center rounded cursor-pointer bg-transparent border-none text-muted hover:text-text hover:bg-bg-hover ${draft.icon === val ? 'bg-accent-subtle ring-1 ring-accent text-accent' : ''}`}
+                    ><Icon size={14} /></button>
+                  )
+                })}
               </div>
-              <Input
-                className={`w-full text-[12px] py-1 ${iconErr ? 'border-danger' : ''}`}
-                maxLength={16}
-                data-testid="folder-config-icon-custom"
-                aria-label={i18nT('components.folderConfigModal.custom_emoji')}
-                placeholder={i18nT('components.folderConfigModal.or_type_paste_an_emoji')}
-                value={customEmoji}
-                onChange={e => { setCustomEmoji(e.target.value); if (iconErr) setIconErr(false) }}
-                {...ime.composition}
-                onKeyDown={e => {
-                  if (e.key !== 'Enter' || ime.isComposing(e)) return
-                  e.preventDefault(); e.stopPropagation()   // don't submit the whole form
-                  const v = customEmoji.trim()
-                  if (!v) return
-                  if (!isSingleEmoji(v)) { setIconErr(true); return }
-                  chooseEmoji(v)
-                }}
-              />
-              {iconErr && <div className="text-[11px] text-danger">{i18nT('components.folderConfigModal.enter_a_single_emoji')}</div>}
             </div>
           )}
 
