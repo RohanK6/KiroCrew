@@ -940,7 +940,45 @@ async def api_agent_detail(request: web.Request) -> web.Response:
                         "kirocrew-lite.json",
                     ):
                         return web.json_response({"error": "cannot delete kirocrew"}, status=400)
-                    f.unlink()
+                    # The dashboard withholds delete for a template that is the
+                    # kiro-cli fallback or is bound to a crew, but a client-side
+                    # check cannot be race-free: its view of the config is a
+                    # cached snapshot, so a crew bound (or the fallback moved)
+                    # between render and click still reaches this handler. Only
+                    # a check that reads config UNDER THE SAME LOCK the writers
+                    # take makes the invariant hold, so this is the authority
+                    # and the UI is now just the early, friendlier signal.
+                    async with _get_config_lock():
+                        cfg = KiroCrewConfig.load()
+                        # Either identifier can be the one config records: the
+                        # JSON's own "name" or the filename stem it was matched by.
+                        aliases = {name, data.get("name") or name}
+                        if cfg.agent.default_agent in aliases:
+                            return web.json_response(
+                                {
+                                    "error": (
+                                        f"Cannot delete '{name}': it is the default agent used "
+                                        "when nothing names a template. Change the default first."
+                                    )
+                                },
+                                status=409,
+                            )
+                        bound = sorted(
+                            crew
+                            for crew, crew_cfg in cfg.agents.items()
+                            if crew_cfg.kiro_agent in aliases
+                        )
+                        if bound:
+                            return web.json_response(
+                                {
+                                    "error": (
+                                        f"Cannot delete '{name}': still used by "
+                                        f"{', '.join(bound)}. Repoint or remove them first."
+                                    )
+                                },
+                                status=409,
+                            )
+                        f.unlink()
                     clear_list_agents_cache()
                     agent_state.prune(data.get("name") or name)
                     state.push_refresh("agents")
