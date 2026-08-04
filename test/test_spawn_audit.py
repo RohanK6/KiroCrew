@@ -351,6 +351,11 @@ BENIGN_SPAWNS: frozenset[str] = frozenset(
         "dashboard/port_reclaim.py::_listeners_on_port",
         "env.py::_run",
         "env.py::activate_mise",
+        # Fixed argv (`npm run build`) in the operator's own checkout. The npm
+        # binary and project path arrive from the caller: the Dev Fleet sync
+        # resolves npm via its trusted-bin allowlist and the path from the
+        # operator-registered worktree, never from agent input.
+        "frontend.py::_npm_build_and_stage_locked",
         "frontend.py::build_frontend_async",
         "frontend.py::build_frontend_sync",
         "instances/diagnostics.py::_run_ok",

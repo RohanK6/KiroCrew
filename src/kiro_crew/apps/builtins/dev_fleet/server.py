@@ -2241,7 +2241,21 @@ async def _sync_start_locked() -> dict:
         ([git_bin, "merge", "--ff-only", f"{remote}/{BASE_BRANCH}"], "strict", _build_env(), "Pull"),
         ([str(target_py), "-m", "pip", "install", "-e", "."], "strict", _build_env(), "pip install"),
         ([npm_bin, "ci", "--prefix", "website"], "strict", _build_env(), "npm ci"),
-        ([npm_bin, "run", "build", "--prefix", "website"], "strict", _build_env(), "npm build"),
+        # Build and stage as ONE step, holding the staging lock across both.
+        # `npm run build` empties website/dist, so a peer flow (the dashboard's
+        # own update) staging concurrently would copy a partially written tree —
+        # and a bundle's lazy chunks are not reachable from index.html, so no
+        # post-hoc inspection of the copy can detect that reliably. Covering
+        # only the copy is not enough; the holder has to span the build.
+        # Runs under the TARGET repo's interpreter for the same reason as the
+        # pip step: its editable install is what resolves which checkout gets
+        # built and staged. npm's resolved trusted path is passed through rather
+        # than re-resolved inside.
+        ([str(target_py), "-c",
+          "import sys; from kiro_crew.frontend import build_and_stage; "
+          "sys.exit(0 if build_and_stage(npm=sys.argv[1]) else 1)",
+          npm_bin],
+         "strict", _build_env(), "npm build + stage"),
     ]
     cleanups: list[str] = []
     wrapped_steps: list[dict] = []
