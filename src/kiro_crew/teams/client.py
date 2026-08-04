@@ -286,12 +286,32 @@ class TeamsClient:
         """
         auth = request.headers.get("Authorization", "")
         token = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
+        # request.remote is the peer IP when present (real aiohttp request); the
+        # bearer failed before any Activity is parsed, so it is the only caller
+        # correlator available. getattr keeps this safe for lightweight test
+        # doubles that omit .remote.
+        peer = getattr(request, "remote", "") or "unknown"
         try:
             claims = await asyncio.to_thread(self._validator.verify, token)
         except TeamsAuthError:
+            # Failed inbound authentication on an external, cookie-auth-exempt
+            # surface is a detective-control event that MUST be audited (CWE-778),
+            # mirroring the serviceUrl-mismatch deny below.
+            sel().log_api_access(
+                caller=peer,
+                operation="teams_client.on_activity",
+                outcome="denied_invalid_token",
+                source="teams",
+            )
             return web.Response(status=401, text="invalid bearer token")
         except Exception:
             logger.exception("Teams: unexpected error validating inbound token")
+            sel().log_api_access(
+                caller=peer,
+                operation="teams_client.on_activity",
+                outcome="denied_token_validation_error",
+                source="teams",
+            )
             return web.Response(status=401, text="token validation error")
 
         try:
