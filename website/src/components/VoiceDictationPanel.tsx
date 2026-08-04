@@ -95,7 +95,7 @@ export default function VoiceDictationPanel({ sampleRef, value, partial, deviceL
             </span>
           )}
           <span className="ml-auto text-muted font-normal font-mono text-[11px]">
-            {i18nT('components.voiceDictationPanel.esc_to_stop_enter_to_send')}
+            {i18nT('components.voiceDictationPanel.esc_to_cancel_enter_to_send')}
           </span>
         </div>
         {/* Text sits over a live shader, so it carries its own shadow floor

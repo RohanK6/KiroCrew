@@ -4203,7 +4203,7 @@
       "update_ready": "Atualização pronta"
     },
     "voiceDictationPanel": {
-      "esc_to_stop_enter_to_send": "Esc para parar, Enter para enviar",
+      "esc_to_cancel_enter_to_send": "Esc para cancelar, Enter para enviar",
       "listening": "Ouvindo"
     },
     "voiceDisabledModal": {

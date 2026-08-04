@@ -32,7 +32,7 @@ describe('VoiceDictationPanel', () => {
 
   it('advertises the keyboard affordances that actually exist', () => {
     render(<VoiceDictationPanel sampleRef={sampleRef} value="" />)
-    expect(screen.getByText('Esc to stop, Enter to send')).toBeTruthy()
+    expect(screen.getByText('Esc to cancel, Enter to send')).toBeTruthy()
   })
 
   it('renders the whole value as committed when there is no partial', () => {
