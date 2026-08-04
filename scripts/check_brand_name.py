@@ -608,11 +608,24 @@ def self_test() -> int:
     # prefix. The assertion is on the GROWTH RATIO, not a wall-clock budget: an
     # absolute threshold generous enough for a loaded CI runner is also generous
     # enough to let a quadratic implementation pass at this size.
+    # Timing is measured best-of-N. A single sample at this size takes tens of
+    # milliseconds, which is the same order as one scheduler preemption on a
+    # loaded CI runner — a lone unlucky sample swung the observed ratio to 3.1x
+    # against a linear implementation. min() over repeats keeps the fastest
+    # (least-interrupted) observation for each size, so the ratio reflects the
+    # algorithm rather than the runner's load. Noise can only ever make a
+    # sample slower, never faster, so this cannot mask a real regression.
+    _TIMING_REPEATS = 5
+
     def timed(count: int) -> tuple[float, int]:
         line = "!KiroCrew" * count
-        began = time.monotonic()
-        found = len(list(scan_line("big.md", 1, line, in_code=False)))
-        return time.monotonic() - began, found
+        best = float("inf")
+        found = 0
+        for _ in range(_TIMING_REPEATS):
+            began = time.monotonic()
+            found = len(list(scan_line("big.md", 1, line, in_code=False)))
+            best = min(best, time.monotonic() - began)
+        return best, found
 
     base_time, base_found = timed(20_000)
     doubled_time, doubled_found = timed(40_000)

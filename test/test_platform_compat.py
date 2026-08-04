@@ -400,6 +400,12 @@ class TestResourceShims:
     def test_proc_cpu_seconds_nonnegative(self):
         assert pc.proc_cpu_seconds() >= 0.0
 
+    def test_proc_cpu_seconds_is_positive_for_a_running_process(self):
+        # A running interpreter has always consumed some CPU. This must be > 0
+        # on every supported platform: on Windows GetCurrentProcess's handle was
+        # truncated without argtypes, so GetProcessTimes failed and this read 0.0.
+        assert pc.proc_cpu_seconds() > 0.0
+
     def test_raise_nofile_soft_limit_is_safe(self):
         # No-op on Windows; best-effort raise on POSIX. Must never raise.
         pc.raise_nofile_soft_limit(4096)

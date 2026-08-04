@@ -120,7 +120,10 @@ the remedy rather than failing obscurely.
 
 | Feature | Status on Windows |
 |---------|-------------------|
-| Core gateway / chat / cron / dashboard | works |
+| Core gateway / chat / dashboard | works |
+| LLM cron jobs (the `message` kind) | works |
+| Script cron jobs | need the `agent.sandbox_allow_unsandboxed_exec` opt-in above — they run through `wrap_argv`, which fail-closes where no OS sandbox backend exists. Without it the job fails with a message naming that setting (it no longer raises an uncaught error) |
+| Command cron jobs (`sh -c "…"`) | not supported on Windows — the stored command is vetted under POSIX-sh semantics, and Windows ships no shell whose language matches: cmd.exe is not POSIX at all, and Git-for-Windows's `sh.exe` is bash and performs brace expansion that hides `cat ~/.a{w,w}s/credentials` from the vet. The job fails-closed with an explanation. Use a **script cron** or an LLM `message` cron on this platform |
 | Pull-request source drawer provider fetch/check/resolve | not yet — provider CLIs require the POSIX OS-level sandbox and fail closed with a clear unsupported response |
 | Browser automation (Playwright MCP) | works (installed via `npm`/`npx @playwright/mcp`) |
 | Vector memory / embeddings | via a **remote embedding endpoint or Docker**; local Ollama auto-install is not yet supported |
