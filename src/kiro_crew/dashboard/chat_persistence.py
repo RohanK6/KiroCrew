@@ -388,7 +388,15 @@ def _rehydrate_slot_from_history(
     # when bulk-restoring — it is identical for every slot.
     if kiro_model_map is None:
         kiro_model_map = _build_kiro_model_map()
-    slot = state.get_or_create_slot(slot_name, app=meta.get("app", ""))
+    slot = state.get_or_create_slot(
+            slot_name,
+            app=meta.get("app", ""),
+            # Restore the persisted origin. Re-deriving it here would relabel
+            # every rehydrated slot on restart, so a cron slot would come back
+            # as USER (leak) and a real user slot as untagged (silently
+            # dropping `slots:user` for apps that legitimately hold it).
+            origin=str(meta.get("origin", "")),
+        )
     # Title comes from the metadata line we already read above. We deliberately
     # do NOT consult ``list_sessions()`` here: that call globbed + stat'd + read
     # the first line of EVERY session file in the history dir (O(all sessions))
@@ -687,7 +695,15 @@ def _restore_recent_sessions_steps(
         if not has_folder and not has_pin:
             if cutoff is not None and s.get("modified", 0) < cutoff:
                 continue
-        slot = state.get_or_create_slot(slot_name, app=meta.get("app", ""))
+        slot = state.get_or_create_slot(
+            slot_name,
+            app=meta.get("app", ""),
+            # Restore the persisted origin. Re-deriving it here would relabel
+            # every rehydrated slot on restart, so a cron slot would come back
+            # as USER (leak) and a real user slot as untagged (silently
+            # dropping `slots:user` for apps that legitimately hold it).
+            origin=str(meta.get("origin", "")),
+        )
         # Titles can be LLM-generated (auto-title) and are surfaced on the
         # dashboard — apply the same redaction as assistant content. Matches
         # the treatment in _rehydrate_slot_from_history above.

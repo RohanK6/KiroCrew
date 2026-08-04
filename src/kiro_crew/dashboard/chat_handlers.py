@@ -57,6 +57,7 @@ from kiro_crew.dashboard.state import (
     _ChatSlot,
     _mark_permission_resolved,
     _normalize_slot_key,
+    request_slot_origin,
 )
 from kiro_crew.dashboard.turn_dispatch import spawn_guarded_turn
 from kiro_crew.messaging.link import is_channel_session_key
@@ -166,6 +167,7 @@ async def api_chat(request: web.Request) -> web.StreamResponse:
         slot = state.get_or_create_slot(
             slot_name,
             app=request.get("app", ""),
+            origin=request_slot_origin(request.get("app", "")),
             memory_mode=requested_memory_mode,
         )
     except ValueError as exc:
@@ -906,6 +908,7 @@ async def api_chat_slot_create(request: web.Request) -> web.Response:
                 memory_mode=memory_mode,
                 ephemeral=body.get("ephemeral"),
                 app=request.get("app", ""),
+                origin=request_slot_origin(request.get("app", "")),
             )
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=409)
@@ -2639,7 +2642,21 @@ async def api_chat_slot_resume(request: web.Request) -> web.Response:
             }
         )
 
-    slot = state.get_or_create_slot(name, app=request.get("app", ""))
+    # Read the history metadata BEFORE creating the slot: this endpoint RESUMES a
+    # persisted conversation, so its origin is a property of that conversation,
+    # not of whoever is resuming it. Deriving it from the request labelled a
+    # resumed CRON slot as USER — and `slots:user` then handed the dashboard
+    # user's private cron output to any app holding that scope. An absent
+    # persisted origin stays empty (get_or_create_slot then derives APP for an
+    # app token, otherwise leaves it untagged, which is invisible to cross-slot
+    # scopes) rather than claiming USER on a conversation we cannot attribute.
+    meta = state.conversation_log.get_metadata(history_key)
+
+    slot = state.get_or_create_slot(
+        name,
+        app=request.get("app", ""),
+        origin=str(meta.get("origin", "")),
+    )
     title = body.get("title", "")
     if title:
         slot.title = title
@@ -2652,7 +2669,6 @@ async def api_chat_slot_resume(request: web.Request) -> web.Response:
                 slot._titled = True
                 break
     # Restore original created_at from history metadata
-    meta = state.conversation_log.get_metadata(history_key)
     if meta.get("created_at"):
         slot.created_at = meta["created_at"]
     if meta.get("agent"):
