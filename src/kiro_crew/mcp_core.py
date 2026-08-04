@@ -3774,6 +3774,19 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
                 "errored": errored,
             },
         )
+        # Mark collected IDs so _subagent_done skips redundant injection.
+        # The blocking tool already delivered results inline; without this the
+        # on_done callback triggers a new _run_chat turn that clobbers any
+        # [OPTIONS:] buttons rendered in the synthesis.
+        if sa_ids and parent_session:
+            try:
+                _post(
+                    "/api/spawn/mark-collected",
+                    {"ids": sa_ids, "parent_session": parent_session},
+                    timeout=5,
+                )
+            except Exception:
+                pass  # best-effort; worst case = duplicate turn (pre-existing behavior)
         return "\n\n".join(sa_results)
 
     if name == "spawn_list":

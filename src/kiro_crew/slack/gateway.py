@@ -4030,6 +4030,20 @@ class GatewayOrchestrator:
                         if _still_running == []:
                             _injection_slot._pending_synthesis = True
 
+                    # ── Skip injection for blocking-tool-collected results ──
+                    # spawn_sub_agents (blocking MCP tool) already delivered
+                    # this result inline as a tool-call return value. Injecting
+                    # it again would trigger a redundant _run_chat turn whose
+                    # assistant response shadows any [OPTIONS:] buttons from the
+                    # synthesis message. Mark delivered and return.
+                    if info.id in _injection_slot._subagents_inline_collected:
+                        _injection_slot._subagents_inline_collected.discard(info.id)
+                        logger.info(
+                            "Subagent %s: skipping injection (already collected inline by spawn_sub_agents)",
+                            info.id,
+                        )
+                        return
+
                     # Fix 2 (B1) race guard: count this completion as an
                     # in-flight delivery from entry until it is handed off (turn
                     # launched or queued). The synthesis fire-gate in chat_runner

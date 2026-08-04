@@ -341,6 +341,41 @@ async def api_spawn_lost(request: web.Request) -> web.Response:
     return web.json_response({"status": "reconciled", "batch_id": batch_id})
 
 
+async def api_spawn_mark_collected(request: web.Request) -> web.Response:
+    """POST /api/spawn/mark-collected — suppress injection for blocking tool.
+
+    Called by the spawn_sub_agents MCP tool after it has polled and collected
+    results inline.  Records the agent IDs on the parent slot so that the
+    subsequent _subagent_done callback skips the _run_chat injection (the model
+    already processed these results as a tool-call return value).  Without this,
+    each completion event triggers a redundant LLM turn whose response shadows
+    any [OPTIONS:] buttons the synthesis message rendered.
+    """
+    state: DashboardState = request.app["state"]
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid JSON"}, status=400)
+    ids = body.get("ids")
+    if not ids or not isinstance(ids, list):
+        return web.json_response({"error": "'ids' array required"}, status=400)
+    parent_session = str(body.get("parent_session", "") or "")
+    # Resolve dashboard slot from parent_session key
+    from kiro_crew.dashboard.chat_utils import dashboard_slot_key
+
+    slot_name = dashboard_slot_key(parent_session)
+    if not slot_name:
+        return web.json_response({"status": "no_slot"})
+    slot = state.get_slot(slot_name)
+    if not slot:
+        return web.json_response({"status": "no_slot"})
+    # Record the IDs (bounded to 200 to prevent unbounded growth)
+    for aid in ids[:200]:
+        if isinstance(aid, str) and aid:
+            slot._subagents_inline_collected.add(aid)
+    return web.json_response({"status": "ok", "marked": len(ids)})
+
+
 def _redact(text: str) -> str:
     """Two-pass redaction for LLM-derived content on external surfaces."""
     text, _ = redact_exfiltration_urls(text)
