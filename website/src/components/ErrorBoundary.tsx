@@ -1,6 +1,8 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { AlertTriangle } from 'lucide-react'
 import { recordEvent } from '../rum'
+import AskAgentButton, { askAgentHard } from './AskAgentButton'
+import { recordError, type ErrorReport } from '../utils/errorReport'
 
 import { i18nT } from '../i18n/t'
 interface State { error: Error | null }
@@ -23,6 +25,12 @@ interface Props {
 export default class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null }
 
+  /**
+   * Journaled report for the caught throw, so the fallback's "ask the agent"
+   * button carries the component stack and not just `error.message`.
+   */
+  private report: ErrorReport | null = null
+
   static getDerivedStateFromError(error: Error) { return { error } }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
@@ -30,6 +38,14 @@ export default class ErrorBoundary extends Component<Props, State> {
     // contract otherwise swallows these throws with no logging anywhere.
     // eslint-disable-next-line no-console
     console.error(`[ErrorBoundary${this.props.scope ? `:${this.props.scope}` : ''}]`, error, info.componentStack)
+    try {
+      this.report = recordError({
+        source: 'render',
+        message: error.message || error.name,
+        code: this.props.scope,
+        detail: [error.stack, info.componentStack].filter(Boolean).join('\n\n'),
+      })
+    } catch { /* journaling must never mask the error it describes */ }
     try {
       recordEvent('react_error', {
         scope: this.props.scope ?? (this.props.root ? 'root' : 'route'),
@@ -70,6 +86,15 @@ export default class ErrorBoundary extends Component<Props, State> {
               className="px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer border-none hover:opacity-90 transition-opacity"
               style={{ backgroundColor: '#2563eb', color: '#ffffff' }}
               onClick={() => this.setState({ error: null })}>{i18nT('components.errorBoundary.try_again')}</button>
+            {/* Hard navigation, not <AskAgentButton>: at the root the store or
+                router may be exactly what threw, so the hand-off has to survive
+                a full page load (utils/errorReport's sessionStorage channel). */}
+            <button
+              className="px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer border-none hover:opacity-90 transition-opacity"
+              style={{ backgroundColor: '#33373d', color: '#f5f5f5', border: '1px solid #4a4f57' }}
+              onClick={() => askAgentHard(this.report ?? { message: this.state.error?.message ?? 'Render error' })}>
+              {i18nT('components.askAgent.ask_the_agent')}
+            </button>
             <button
               className="px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer hover:opacity-90 transition-opacity"
               style={{ backgroundColor: '#33373d', color: '#f5f5f5', border: '1px solid #4a4f57' }}
@@ -85,8 +110,18 @@ export default class ErrorBoundary extends Component<Props, State> {
         <div className="text-4xl"><AlertTriangle className="lucide-inline" /></div>
         <div className="text-lg font-bold text-text-strong">{i18nT('components.errorBoundary.something_went_wrong')}</div>
         <div className="text-sm text-muted max-w-md break-words">{this.state.error.message}</div>
-        <button className="px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer bg-accent text-accent-fg border-none hover:opacity-90 transition-opacity"
-          onClick={() => this.setState({ error: null })}>{i18nT('components.errorBoundary.try_again')}</button>
+        <div className="flex items-center gap-2">
+          {/* "Ask the agent" is the primary here on purpose: this is an agent app,
+              and after a crash the agent is likelier to resolve it than a retry. */}
+          <AskAgentButton
+            report={this.report ?? undefined}
+            message={this.state.error.message}
+            variant="solid"
+            hard
+          />
+          <button className="px-4 py-1.5 rounded-lg text-[13px] font-medium cursor-pointer bg-transparent text-muted border border-border hover:text-text hover:border-text-strong transition-colors"
+            onClick={() => this.setState({ error: null })}>{i18nT('components.errorBoundary.try_again')}</button>
+        </div>
       </div>
     )
   }

@@ -19,6 +19,7 @@ import SortableHeader from '../../components/SortableHeader'
 import { useCronActions } from '../../hooks/useCronActions'
 
 import { i18nT } from '../../i18n/t'
+import ErrorNotice from '../../components/ErrorNotice'
 export default function CronTab({ refreshTrigger }: { refreshTrigger: number }) {
   const provider = useProvider()
   const noCrons = useAppSelector(s => s.dashboard.status?.no_crons)
@@ -149,7 +150,7 @@ export default function CronTab({ refreshTrigger }: { refreshTrigger: number }) 
           </>)}
           <SendBtn onClick={add}>{i18nT('pages.overview.cronTab.add')}</SendBtn>
         </div>
-        {error && <div className="text-danger text-[13px]">{error}</div>}
+        <ErrorNotice message={error} />
       </div></Card>
     <Card><CardTitle>{i18nT('pages.overview.cronTab.jobs')}</CardTitle>
       <div className="mb-3"><SearchInput placeholder={i18nT('pages.overview.cronTab.filter_jobs')} value={cronFilter} onChange={e => setCronFilter(e.target.value)} /></div>

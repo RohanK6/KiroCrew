@@ -1,5 +1,7 @@
 import { Component, type ReactNode } from 'react'
 import { AlertTriangle, Code } from 'lucide-react'
+import AskAgentButton from './AskAgentButton'
+import { recordError, type ErrorReport } from '../utils/errorReport'
 
 import { i18nT } from '../i18n/t'
 interface Props {
@@ -24,11 +26,22 @@ interface State {
 export default class MessageErrorBoundary extends Component<Props, State> {
   state: State = { error: null, showRaw: false }
 
+  /** Journaled report, so the fallback's agent hand-off carries the stack. */
+  private report: ErrorReport | null = null
+
   static getDerivedStateFromError(error: Error) { return { error } }
 
   componentDidCatch(error: Error) {
     // eslint-disable-next-line no-console
     console.error('[MessageErrorBoundary] Message render failed:', error.message)
+    try {
+      this.report = recordError({
+        source: 'render',
+        message: error.message || error.name,
+        code: 'message_render',
+        detail: [error.stack, this.props.rawContent].filter(Boolean).join('\n\n'),
+      })
+    } catch { /* journaling must never mask the error it describes */ }
   }
 
   componentDidUpdate(prevProps: Props) {
@@ -49,9 +62,14 @@ export default class MessageErrorBoundary extends Component<Props, State> {
         <div className="flex items-center gap-1.5 text-warning">
           <AlertTriangle size={14} />
           <span className="font-medium">{i18nT('components.messageErrorBoundary.message_failed_to_render')}</span>
+          <AskAgentButton
+            report={this.report ?? undefined}
+            message={this.state.error.message}
+            className="ml-auto"
+          />
           {this.props.rawContent && (
             <button
-              className="ml-auto flex items-center gap-1 text-[11px] text-muted hover:text-text transition-colors cursor-pointer"
+              className="flex items-center gap-1 text-[11px] text-muted hover:text-text transition-colors cursor-pointer"
               onClick={() => this.setState(s => ({ showRaw: !s.showRaw }))}
             >
               <Code size={12} />
