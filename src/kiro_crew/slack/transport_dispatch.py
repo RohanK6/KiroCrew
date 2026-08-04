@@ -101,6 +101,25 @@ async def handle_message_transport(
     reply_ts = thread_ts or msg_ts
     session_key = canonical_key(reply_ts)
 
+    # ── Resolve the thread to its OWNING session (mirrors native handle_message) ──
+    # canonical_key above is purely syntactic: it namespaces the bare thread ts
+    # into ``slack:<ts>``. That is only the right session when this thread was
+    # BORN in Slack. A thread created by the dashboard's send-to-Slack action
+    # belongs to that dashboard session, and the binding lives in the thread
+    # index (keyed by the bare thread_ts, not the namespaced key). Without this
+    # lookup a reply in such a thread mints a brand-new ``slack:<ts>`` session
+    # -- forking one conversation into two, with the reply landing in a session
+    # that has none of the dashboard context. reply_ts stays untouched: it is
+    # still the Slack timestamp we post and react to.
+    linked_session_key = sessions.get_session_for_thread(reply_ts)
+    if linked_session_key and linked_session_key != session_key:
+        logger.info(
+            "🔗 Slack thread %s linked to session %s — routing there",
+            session_key,
+            linked_session_key,
+        )
+        session_key = linked_session_key
+
     # Inbound channels-governance gate (off-loop), same as native handle_message:
     # a ``channels`` policy that denies ``slack`` drops the message before any
     # processing. Default build (no policy) permits — behavior unchanged.
@@ -239,6 +258,27 @@ async def handle_message_transport(
         # of this function (before the hook/privacy/keyword early paths), so we
         # do not re-hydrate here.
 
+        # ── Final ownership check, as late as possible before we commit ──
+        # The resolution at the top of this function is the one hydration and the
+        # !temporary / !incognito handlers needed, but it is many awaits old by
+        # now (inbound governance, the hook path, renderer start). Re-resolve
+        # here so the turn is ACQUIRED under the thread's current owner instead
+        # of a stale one -- otherwise a Link-to-Dashboard click landing in that
+        # window leaves this reply running in a contextless Slack session.
+        # Deliberately before the _agent resolution below, which is keyed by
+        # session_key. A change that lands DURING get_or_create is not handled
+        # here: the turn stays in whoever owned the thread at acquisition, and
+        # the self-link guard below keeps the index uncorrupted either way.
+        _current_owner = sessions.get_session_for_thread(reply_ts)
+        if _current_owner and _current_owner != session_key:
+            logger.info(
+                "🔗 Slack thread %s changed owner to %s before acquisition — routing there",
+                session_key,
+                _current_owner,
+            )
+            session_key = _current_owner
+            linked_session_key = _current_owner
+
         # Resolve the kiro-cli agent. Thread override (set via !agent), then the
         # per-channel override (slack.channels.<id>.agent), then the configured
         # default win; otherwise fall back to the canonical "kirocrew" agent so
@@ -257,7 +297,20 @@ async def handle_message_transport(
         _acquired = True
         if is_new:
             await sessions.set_channel(session_key, channel)
-        sessions.set_slack_link(session_key, reply_ts, channel)
+        if not linked_session_key and not sessions.get_session_for_thread(reply_ts):
+            # Two conditions, deliberately. The first is the routing decision
+            # made at the top of this function. The second is a FRESH read,
+            # because that decision is many awaits old by now -- inbound
+            # governance, the hook path and session acquisition all yield -- and
+            # a dashboard send-to-Slack landing in that window would claim this
+            # thread after we looked. Self-linking on the stale value would
+            # overwrite that newer binding and send every later reply to the
+            # wrong session. Only claim a thread that is STILL unclaimed; the
+            # turn itself continues on the session we already acquired.
+            #
+            # reply_ts (not session_key) is the true Slack timestamp -- storing
+            # the namespaced key as slack_thread_ts would corrupt reply routing.
+            sessions.set_slack_link(session_key, reply_ts, channel)
         # Publish this turn's session identity so managed MCP tools resolve
         # X-Session-Key; one shared writer lives in messaging.identity.
         await publish_turn_identity(sessions, session_key)
