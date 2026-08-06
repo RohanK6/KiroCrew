@@ -174,9 +174,7 @@ class TestChatSlot:
         assert payload["source_links_total"] == 1
         assert payload["source_links"][0]["url"] == url
 
-    @pytest.mark.parametrize(
-        "role", ["chunk", "done", "streaming", "queued", "permission"]
-    )
+    @pytest.mark.parametrize("role", ["chunk", "done", "streaming", "queued", "permission"])
     def test_pr_source_links_ignore_non_durable_roles(self, role):
         slot = _ChatSlot("s1")
         slot.append(role, "https://github.com/acme/widgets/pull/12")
@@ -406,9 +404,7 @@ class TestBroadcastCompactionResultBackoff:
 
         # Still within cooldown: suppressed.
         fake_now[0] += 1.0
-        assert (
-            chat_utils._broadcast_compaction_result(state, slot, self._failed_event()) is None
-        )
+        assert chat_utils._broadcast_compaction_result(state, slot, self._failed_event()) is None
 
         # Cooldown elapses: next failure collapses the streak into one message.
         fake_now[0] += chat_utils._COMPACTION_FAIL_COOLDOWN_SECS + 1.0
@@ -451,9 +447,7 @@ class TestBroadcastCompactionResultBackoff:
         _broadcast_compaction_result(state, slot, self._completed_event())
 
         resets = [
-            c
-            for c in state.broadcast_ws.call_args_list
-            if c.args and c.args[0] == "context_usage"
+            c for c in state.broadcast_ws.call_args_list if c.args and c.args[0] == "context_usage"
         ]
         assert resets, "completed compaction must broadcast a context_usage event"
         payload = resets[0].args[1]
@@ -468,9 +462,7 @@ class TestBroadcastCompactionResultBackoff:
         _broadcast_compaction_result(state, slot, self._failed_event())
 
         assert not [
-            c
-            for c in state.broadcast_ws.call_args_list
-            if c.args and c.args[0] == "context_usage"
+            c for c in state.broadcast_ws.call_args_list if c.args and c.args[0] == "context_usage"
         ]
 
 
@@ -526,9 +518,7 @@ class TestApiChatMemoryModeForwarding:
         async def fake_run_chat(st, sl, msg):
             sl.append("chunk", "ack", "chunk")
 
-        monkeypatch.setattr(
-            "kiro_crew.dashboard.chat_handlers._run_chat", fake_run_chat
-        )
+        monkeypatch.setattr("kiro_crew.dashboard.chat_handlers._run_chat", fake_run_chat)
 
         async with TestClient(TestServer(_make_app(state))) as client:
             resp = await client.post(
@@ -556,9 +546,7 @@ class TestApiChatMemoryModeForwarding:
         async def fake_run_chat(st, sl, msg):
             sl.append("chunk", "ack", "chunk")
 
-        monkeypatch.setattr(
-            "kiro_crew.dashboard.chat_handlers._run_chat", fake_run_chat
-        )
+        monkeypatch.setattr("kiro_crew.dashboard.chat_handlers._run_chat", fake_run_chat)
 
         async with TestClient(TestServer(_make_app(state))) as client:
             resp = await client.post(
@@ -582,9 +570,7 @@ class TestApiChatMemoryModeForwarding:
         async def fake_run_chat(st, sl, msg):
             sl.append("chunk", "ack", "chunk")
 
-        monkeypatch.setattr(
-            "kiro_crew.dashboard.chat_handlers._run_chat", fake_run_chat
-        )
+        monkeypatch.setattr("kiro_crew.dashboard.chat_handlers._run_chat", fake_run_chat)
 
         async with TestClient(TestServer(_make_app(state))) as client:
             resp = await client.post(
@@ -607,6 +593,7 @@ class TestApiChatMemoryModeForwarding:
 
     async def test_mismatched_memory_mode_on_existing_slot_returns_409(self, tmp_path, monkeypatch):
         from unittest.mock import MagicMock
+
         mock_sel = MagicMock()
         monkeypatch.setattr("kiro_crew.dashboard.chat_handlers.sel", lambda: mock_sel)
         monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
@@ -629,8 +616,9 @@ class TestApiChatMemoryModeForwarding:
             assert "memory_mode" in data["error"]
 
         # SEL audit event for the denial
-        denied_calls = [c for c in mock_sel.log_api_access.call_args_list
-                        if c[1].get("outcome") == "denied"]
+        denied_calls = [
+            c for c in mock_sel.log_api_access.call_args_list if c[1].get("outcome") == "denied"
+        ]
         assert len(denied_calls) == 1
         kw = denied_calls[0][1]
         assert kw["operation"] == "chat_send"
@@ -841,9 +829,7 @@ class TestSlotLifecycle:
         assert callback == state.push_slots_update
 
     @pytest.mark.asyncio
-    async def test_list_slots_omits_status_and_refresh_for_non_owner(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_list_slots_omits_status_and_refresh_for_non_owner(self, tmp_path, monkeypatch):
         monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
         from kiro_crew.dashboard import state as state_module
         from kiro_crew.dashboard.handlers import source_providers
@@ -1848,7 +1834,10 @@ class TestInMemoryAuthority:
 
         # sessA got its new turn; sessB is byte-for-byte untouched.
         assert [m["content"] for m in log.read_messages("dashboard:sessA")] == [
-            "A0", "A1", "A2", "A-new"
+            "A0",
+            "A1",
+            "A2",
+            "A-new",
         ]
         assert log.read_messages("dashboard:sessB") == b_before
 
@@ -1908,9 +1897,7 @@ class TestInMemoryAuthority:
 
         disk = log.read_messages("dashboard:s11")
         # Frozen prefix preserved + kept window head; dropped tail archived.
-        assert [m["content"] for m in disk] == [
-            "old 0", "old 1", "old 2", "old 3", "old 4"
-        ]
+        assert [m["content"] for m in disk] == ["old 0", "old 1", "old 2", "old 3", "old 4"]
         archives = list((tmp_path / "archive").glob("dashboard_s11__*.jsonl"))
         assert len(archives) == 1
         content = archives[0].read_text(encoding="utf-8")
@@ -2142,6 +2129,108 @@ class TestSessionRename:
             slot = state._slots["s1"]
             assert slot.title == "My Custom Title"
             assert slot._titled is True
+
+    @pytest.mark.asyncio
+    async def test_resumed_session_restores_tags_and_auto_tagged(self, tmp_path, monkeypatch):
+        """Regression: resume must restore tags AND the auto-tag once-flag.
+        Without the flag, resuming a session whose auto-tag the user removed
+        re-runs maybe_auto_tag on the next message and silently re-adds it."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        state = _make_state(tmp_path)
+        log = state.conversation_log
+        log.append("dashboard:s1", "user", "hello")
+        # The id must exist in the vocabulary — resume prunes unknown ids
+        # (crash-atomic delete can leave dangling ids on disk).
+        state._tags.append({"id": "tag-abc", "name": "ABC", "color": "#6b7280", "order": 0})
+        log.update_metadata(
+            "dashboard:s1",
+            {"tags": ["tag-abc"], "auto_tagged": True, "project": "/x/repos/MyRepo"},
+        )
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.post(
+                "/api/chat/slots/s1/resume",
+                json={"key": "dashboard:s1"},
+            )
+            assert resp.status == 200
+            slot = state._slots["s1"]
+            assert slot.tags == ["tag-abc"]
+            assert slot._auto_tagged is True
+
+    @pytest.mark.asyncio
+    async def test_resume_unreadable_vocab_does_not_wipe_tags(self, tmp_path, monkeypatch):
+        """FAIL-OPEN: if tags.json failed to load (vocabulary UNKNOWN), resume
+        must NOT prune — pruning against an unknown vocab would wipe every
+        assignment and the next save persists the loss."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        state = _make_state(tmp_path)
+        state._tags = []
+        state._tags_authoritative = False  # load_tags() hit a parse/I/O error
+        log = state.conversation_log
+        log.append("dashboard:s1", "user", "hello")
+        log.update_metadata("dashboard:s1", {"tags": ["tag-abc"], "auto_tagged": True})
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.post("/api/chat/slots/s1/resume", json={"key": "dashboard:s1"})
+            assert resp.status == 200
+            slot = state._slots["s1"]
+            assert slot.tags == ["tag-abc"]  # preserved, not wiped
+            assert slot._auto_tagged is True
+
+    @pytest.mark.asyncio
+    async def test_resume_empty_authoritative_vocab_prunes_dangling_ids(
+        self, tmp_path, monkeypatch
+    ):
+        """A legitimately-empty vocabulary (last tag deleted, tags.json parsed
+        fine as []) IS authoritative: resume must prune the dangling id, or a
+        crash between the vocab commit and slot cleanup would resurrect the
+        deleted tag id on this slot forever."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        state = _make_state(tmp_path)
+        state._tags = []
+        state._tags_authoritative = True  # tags.json parsed OK as []
+        log = state.conversation_log
+        log.append("dashboard:s1", "user", "hello")
+        log.update_metadata("dashboard:s1", {"tags": ["tag-abc"], "auto_tagged": True})
+
+        async with TestClient(TestServer(_make_app(state))) as client:
+            resp = await client.post("/api/chat/slots/s1/resume", json={"key": "dashboard:s1"})
+            assert resp.status == 200
+            slot = state._slots["s1"]
+            assert slot.tags == []  # dangling id pruned
+            assert slot._auto_tagged is True
+
+    def test_load_tags_sets_authoritative_flag(self, tmp_path, monkeypatch):
+        """load_tags() marks the vocabulary authoritative on a clean parse
+        (including a legitimately-empty []) and NOT authoritative on a parse
+        failure — the signal the restore-time pruning fail-open relies on."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        state = _make_state(tmp_path)
+
+        # Legitimately-empty vocabulary: parsed OK -> authoritative.
+        (tmp_path / "tags.json").write_text("[]", encoding="utf-8")
+        state._tags = []
+        state._tags_authoritative = False
+        state.load_tags()
+        assert state._tags_authoritative is True
+        assert state._tags == []
+
+        # Corrupt file: parse failure -> NOT authoritative, data untouched.
+        (tmp_path / "tags.json").write_text("{not json", encoding="utf-8")
+        state._tags = [{"id": "keep-me", "name": "Keep", "status": False}]
+        state._tags_authoritative = True
+        state.load_tags()
+        assert state._tags_authoritative is False
+        assert state._tags[0]["id"] == "keep-me"  # not re-seeded, not wiped
+
+        # Valid JSON but NOT a list (e.g. {}): vocabulary state is unknown,
+        # same as a parse failure -- NOT authoritative, data untouched.
+        (tmp_path / "tags.json").write_text("{}", encoding="utf-8")
+        state._tags = [{"id": "keep-me", "name": "Keep", "status": False}]
+        state._tags_authoritative = True
+        state.load_tags()
+        assert state._tags_authoritative is False
+        assert state._tags[0]["id"] == "keep-me"
 
 
 # ── Session color tests ──
@@ -2992,15 +3081,37 @@ class TestRunChatNativeSubagentAttribution:
             # 1) crew list → spawn one card
             LLMEvent(kind=EVENT_SUBAGENT_LIST, subagents=[_sub("working")]),
             # 2) private-channel activity maps the inner toolCallId → this card
-            LLMEvent(kind=EVENT_SUBAGENT_ACTIVITY, sub_session_id="sess-1", tool_call_id="tc-1", title="read"),
+            LLMEvent(
+                kind=EVENT_SUBAGENT_ACTIVITY,
+                sub_session_id="sess-1",
+                tool_call_id="tc-1",
+                title="read",
+            ),
             # 3) flat tool_call (full title) → attributed to the card
-            LLMEvent(kind=EVENT_TOOL_CALL, title="Reading foo.py:1", tool_kind="read", tool_call_id="tc-1"),
+            LLMEvent(
+                kind=EVENT_TOOL_CALL,
+                title="Reading foo.py:1",
+                tool_kind="read",
+                tool_call_id="tc-1",
+            ),
             # 4) flat tool_result (real output) → attributed + accumulated
-            LLMEvent(kind=EVENT_TOOL_RESULT, tool_call_id="tc-1", tool_output="file body XYZ", tool_final=True),
+            LLMEvent(
+                kind=EVENT_TOOL_RESULT,
+                tool_call_id="tc-1",
+                tool_output="file body XYZ",
+                tool_final=True,
+            ),
             # 5) duplicate tool_result (kiro sends content + rawOutput) → deduped
-            LLMEvent(kind=EVENT_TOOL_RESULT, tool_call_id="tc-1", tool_output="file body XYZ", tool_final=True),
+            LLMEvent(
+                kind=EVENT_TOOL_RESULT,
+                tool_call_id="tc-1",
+                tool_output="file body XYZ",
+                tool_final=True,
+            ),
             # 5b) sub-agent text streamed on the private channel (agent_message_chunk)
-            LLMEvent(kind=EVENT_SUBAGENT_ACTIVITY, sub_session_id="sess-1", text="thinking out loud"),
+            LLMEvent(
+                kind=EVENT_SUBAGENT_ACTIVITY, sub_session_id="sess-1", text="thinking out loud"
+            ),
             # 6) crew list terminal → done with accumulated feed
             LLMEvent(kind=EVENT_SUBAGENT_LIST, subagents=[_sub("terminated")]),
             LLMEvent(kind=EVENT_COMPLETE),
@@ -3025,10 +3136,12 @@ class TestRunChatNativeSubagentAttribution:
         assert spawns[0]["task"] == "explore acp"
 
         # Tool call + output streamed onto the card.
-        chunks = [d.get("text", "") for t, d in calls if t == "subagent_chunk" and d.get("id") == card]
+        chunks = [
+            d.get("text", "") for t, d in calls if t == "subagent_chunk" and d.get("id") == card
+        ]
         joined = "".join(chunks)
         assert "Reading foo.py:1" in joined  # full tool title from flat tool_call
-        assert "file body XYZ" in joined     # real tool output
+        assert "file body XYZ" in joined  # real tool output
         assert "thinking out loud" in joined  # sub-agent text (agent_message_chunk)
 
         # Dedupe: the duplicate tool_result must NOT double-print the output.
@@ -3154,9 +3267,7 @@ class TestRunChatCompactDeferredWait:
         # provider's counts were just dropped, so a payload broadcast would
         # claim "0 used" of a window nothing has re-measured yet.
         usage_calls = [
-            c
-            for c in state.broadcast_ws.call_args_list
-            if c.args and c.args[0] == "context_usage"
+            c for c in state.broadcast_ws.call_args_list if c.args and c.args[0] == "context_usage"
         ]
         assert {"slot": slot.key, "pct": 0.0, "reset": True} in [c.args[1] for c in usage_calls]
         # No later broadcast may resurrect the stale pre-compaction meter.
@@ -3195,9 +3306,7 @@ class TestRunChatCompactDeferredWait:
         await _run_chat(state, slot, "/compact")
 
         usage_calls = [
-            c
-            for c in state.broadcast_ws.call_args_list
-            if c.args and c.args[0] == "context_usage"
+            c for c in state.broadcast_ws.call_args_list if c.args and c.args[0] == "context_usage"
         ]
         assert usage_calls
         expected = {
@@ -3236,9 +3345,7 @@ class TestRunChatCompactDeferredWait:
         await _run_chat(state, slot, "/compact")
 
         usage_calls = [
-            c
-            for c in state.broadcast_ws.call_args_list
-            if c.args and c.args[0] == "context_usage"
+            c for c in state.broadcast_ws.call_args_list if c.args and c.args[0] == "context_usage"
         ]
         assert usage_calls
         payload = usage_calls[-1].args[1]
@@ -3524,9 +3631,7 @@ class TestKiroBackfillProfileGuard:
 
         events = [LLMEvent(kind=EVENT_COMPLETE, usage=TurnUsage(input_tokens=3, output_tokens=4))]
 
-        state = TestTokenPersistenceBackfill._make_state_for_run_chat(
-            tmp_path, monkeypatch
-        )
+        state = TestTokenPersistenceBackfill._make_state_for_run_chat(tmp_path, monkeypatch)
         slot = state.get_or_create_slot("s1")
         slot.model = ""  # user picked nothing explicit on this turn
 
@@ -3580,9 +3685,7 @@ class TestPinnedModelWithheld:
     @staticmethod
     def _client(advertised, *, claude_backend=False):
         client = MagicMock()
-        client.available_models = MagicMock(
-            return_value=[{"modelId": m} for m in advertised]
-        )
+        client.available_models = MagicMock(return_value=[{"modelId": m} for m in advertised])
         client.is_claude_backend = claude_backend
         return client
 
@@ -3695,23 +3798,19 @@ class TestPinnedModelWithheld:
             for c in state.broadcast_ws.call_args_list
             if c.args and c.args[0] == "activity_event" and c.args[1].get("kind") == "session"
         ]
-        assert any(f.get("spawned") is True for f in session_frames), (
-            f"a new session must report spawned=True, got {session_frames}"
-        )
-        assert all("claude-opus-5" not in f.get("text", "") for f in session_frames), (
-            f"the session line must report the effective model, got {session_frames}"
-        )
-        assert any("auto" in f.get("text", "") for f in session_frames), (
-            f"expected the effective model on the session line, got {session_frames}"
-        )
+        assert any(
+            f.get("spawned") is True for f in session_frames
+        ), f"a new session must report spawned=True, got {session_frames}"
+        assert all(
+            "claude-opus-5" not in f.get("text", "") for f in session_frames
+        ), f"the session line must report the effective model, got {session_frames}"
+        assert any(
+            "auto" in f.get("text", "") for f in session_frames
+        ), f"expected the effective model on the session line, got {session_frames}"
         # But the user must be able to learn why their model is not being used, and
         # that explanation has to survive a reload the same way the pin does — so
         # it is a persisted transcript row, not a transient activity line.
-        notices = [
-            m.get("content", "")
-            for m in slot.messages
-            if m.get("role") == "notice"
-        ]
+        notices = [m.get("content", "") for m in slot.messages if m.get("role") == "notice"]
         assert any(
             "claude-opus-5" in t and "isn't offered right now" in t for t in notices
         ), f"expected a persisted notice naming the withheld model, got {notices}"
@@ -3752,9 +3851,7 @@ class TestPinnedModelWithheld:
                 raise ValueError("config became unreadable mid-turn")
             return real_cfg
 
-        monkeypatch.setattr(
-            "kiro_crew.dashboard.chat_runner.KiroCrewConfig.load", load_then_break
-        )
+        monkeypatch.setattr("kiro_crew.dashboard.chat_runner.KiroCrewConfig.load", load_then_break)
 
         client = AsyncMock()
         client.context_usage_pct = MagicMock(return_value=10.0)
@@ -3835,13 +3932,13 @@ class TestPinnedModelWithheld:
             for c in state.broadcast_ws.call_args_list
             if c.args and c.args[0] == "activity_event" and c.args[1].get("kind") == "session"
         ]
-        assert any("claude-opus-5" in f.get("text", "") for f in session_frames), (
-            f"an entitled pin must still be named on the session line, got {session_frames}"
-        )
+        assert any(
+            "claude-opus-5" in f.get("text", "") for f in session_frames
+        ), f"an entitled pin must still be named on the session line, got {session_frames}"
         notices = [m.get("content", "") for m in slot.messages if m.get("role") == "notice"]
-        assert not any("isn't offered right now" in t for t in notices), (
-            f"nothing was withheld, so there must be no notice, got {notices}"
-        )
+        assert not any(
+            "isn't offered right now" in t for t in notices
+        ), f"nothing was withheld, so there must be no notice, got {notices}"
 
     @pytest.mark.asyncio
     async def test_run_chat_stays_quiet_on_a_warm_session(self, tmp_path, monkeypatch):
@@ -3883,14 +3980,10 @@ class TestPinnedModelWithheld:
 
         await _run_chat(state, slot, "hello")
 
-        notices = [
-            m.get("content", "")
-            for m in slot.messages
-            if m.get("role") == "notice"
-        ]
-        assert not any("isn't offered right now" in t for t in notices), (
-            f"the withhold notice must not repeat every turn, got {notices}"
-        )
+        notices = [m.get("content", "") for m in slot.messages if m.get("role") == "notice"]
+        assert not any(
+            "isn't offered right now" in t for t in notices
+        ), f"the withhold notice must not repeat every turn, got {notices}"
         assert slot.model == "claude-opus-5"
         # A warm turn respawns nothing, so the session frame must say so: the
         # frontend refetches the entitlement-narrowed model list on `spawned`,
@@ -3902,9 +3995,9 @@ class TestPinnedModelWithheld:
             if c.args and c.args[0] == "activity_event" and c.args[1].get("kind") == "session"
         ]
         assert session_frames, "the session frame is emitted on warm turns too"
-        assert all(f.get("spawned") is False for f in session_frames), (
-            f"warm turn must not claim a spawn, got {session_frames}"
-        )
+        assert all(
+            f.get("spawned") is False for f in session_frames
+        ), f"warm turn must not claim a spawn, got {session_frames}"
 
     @pytest.mark.asyncio
     async def test_run_chat_keeps_an_entitled_pin(self, tmp_path, monkeypatch):
@@ -4322,9 +4415,7 @@ class TestRuntimeWiring:
         assert build_message_calls[0]["kwargs"].get("memory_store") == "oncall-mem"
 
     @pytest.mark.asyncio
-    async def test_run_chat_forwards_and_clears_the_reinjection_flag(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_run_chat_forwards_and_clears_the_reinjection_flag(self, tmp_path, monkeypatch):
         """A compaction flags the session; the NEXT _run_chat must forward
         needs_reinjection=True to build_message and clear the flag so the turn
         after that does not re-inject again.
@@ -5760,9 +5851,9 @@ class TestOrchestratorPlanGateArming:
 
         assert calls == 1, "loop must stop after the plan shrank, not over-run"
         seps = [m["content"] for m in slot.messages if "stage-sep" in m.get("cls", "")]
-        assert not any("Stage 2" in s or "Stage 3" in s for s in seps), (
-            "no phantom stage beyond the live plan size may be built"
-        )
+        assert not any(
+            "Stage 2" in s or "Stage 3" in s for s in seps
+        ), "no phantom stage beyond the live plan size may be built"
 
     # ── P0 hardening: stage turn ceiling + subagent wait cap ──
 
@@ -5810,9 +5901,7 @@ class TestOrchestratorPlanGateArming:
                 swallowed = True
                 return None
 
-        monkeypatch.setattr(
-            "kiro_crew.dashboard.chat_orchestrator._run_chat", _hang_and_swallow
-        )
+        monkeypatch.setattr("kiro_crew.dashboard.chat_orchestrator._run_chat", _hang_and_swallow)
 
         await asyncio.wait_for(_stage_loop(state, slot, auto_run=True), timeout=30)
 
@@ -5822,9 +5911,7 @@ class TestOrchestratorPlanGateArming:
             "timed out" in m.get("content", "") for m in slot.messages
         ), "the user must see a timeout card, not a silently-advanced stage"
         seps = [m["content"] for m in slot.messages if "stage-sep" in m.get("cls", "")]
-        assert not any("Stage 2" in s for s in seps), (
-            "a cut stage must NOT advance to the next one"
-        )
+        assert not any("Stage 2" in s for s in seps), "a cut stage must NOT advance to the next one"
 
     @pytest.mark.asyncio
     async def test_stage_loop_disabled_timeout_does_not_abort_instantly(
@@ -7240,9 +7327,7 @@ class TestFolderCRUD:
             )
             assert resp.status == 201
             assert (await resp.json())["color"] == "#ef4444"
-            bad = await client.post(
-                "/api/chat/folders", json={"name": "Bad", "color": "#123456"}
-            )
+            bad = await client.post("/api/chat/folders", json={"name": "Bad", "color": "#123456"})
             assert bad.status == 400
             assert (await bad.json())["code"] == "color_invalid"
 
@@ -7257,7 +7342,10 @@ class TestFolderCRUD:
 
         catalog = (
             Path(__file__).resolve().parent.parent
-            / "website" / "src" / "components" / "folderColorCatalog.tsx"
+            / "website"
+            / "src"
+            / "components"
+            / "folderColorCatalog.tsx"
         )
         frontend = set(re.findall(r"#[0-9a-f]{6}", catalog.read_text(encoding="utf-8")))
         assert frontend == set(_FOLDER_COLOR_PALETTE)
@@ -7480,7 +7568,9 @@ class TestFolderCRUD:
         monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
         state = _make_state(tmp_path)
         state.get_or_create_slot("myslot")
-        state._folders = [{"id": "f1", "name": "Test", "order": 0, "collapsed": False, "hidden": True}]
+        state._folders = [
+            {"id": "f1", "name": "Test", "order": 0, "collapsed": False, "hidden": True}
+        ]
         app = _make_folder_app(state)
         async with TestClient(TestServer(app)) as client:
             # Moving a session into a hidden folder re-engages it (Model B) → un-hides.
@@ -7500,7 +7590,9 @@ class TestFolderCRUD:
 
         monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
         state = _make_state(tmp_path)
-        state._folders = [{"id": "f1", "name": "Test", "order": 0, "collapsed": False, "hidden": True}]
+        state._folders = [
+            {"id": "f1", "name": "Test", "order": 0, "collapsed": False, "hidden": True}
+        ]
         # Create a session filed in f1, persist it to history, then drop the active
         # slot so resume loads it fresh from history (the revive path).
         slot = state.get_or_create_slot("revive1")
@@ -7853,8 +7945,15 @@ class TestGenerateEmojiForName:
         state.save_folders = MagicMock()
         state.push_slots_update = MagicMock()
 
-        with patch("kiro_crew.dashboard.chat_folders.redact_exfiltration_urls", return_value=("🔥", False)) as mock_url, \
-             patch("kiro_crew.dashboard.chat_folders.redact_credentials", return_value=("🔥", False)) as mock_cred:
+        with (
+            patch(
+                "kiro_crew.dashboard.chat_folders.redact_exfiltration_urls",
+                return_value=("🔥", False),
+            ) as mock_url,
+            patch(
+                "kiro_crew.dashboard.chat_folders.redact_credentials", return_value=("🔥", False)
+            ) as mock_cred,
+        ):
             icon = await generate_emoji_for_name(state, "Oncall")
             assert icon == "🔥"
             mock_url.assert_called_once()
@@ -8353,9 +8452,7 @@ class TestRegenerateAndVariants:
         state.get_or_create_slot("s1")
         app = web.Application()
         app["state"] = state
-        app.router.add_post(
-            "/api/chat/slots/{slot}/edit-resend", api_chat_slot_edit_resend
-        )
+        app.router.add_post("/api/chat/slots/{slot}/edit-resend", api_chat_slot_edit_resend)
         async with TestClient(TestServer(app)) as client:
             for bad in ("[1, 2]", '"hi"', "42"):
                 resp = await client.post(
@@ -8643,9 +8740,7 @@ class TestForkSlot:
         failing_save = AsyncMock(side_effect=RuntimeError("lock timeout"))
         app = _make_app(state)
         async with TestClient(TestServer(app)) as client:
-            with patch(
-                "kiro_crew.dashboard.chat_fork.save_slot_off_loop", failing_save
-            ):
+            with patch("kiro_crew.dashboard.chat_fork.save_slot_off_loop", failing_save):
                 resp = await client.post("/api/chat/slots/src/fork", json={})
                 assert resp.status == 503
 
@@ -8718,9 +8813,7 @@ class TestForkSlot:
         slot.append("user", "plain msg", "msg msg-u")
         slot.append("assistant", "plain reply", "msg msg-a")
         slot.drain()
-        parent_meta = [
-            m.get("meta") for m in slot.messages if m["role"] in ("user", "assistant")
-        ]
+        parent_meta = [m.get("meta") for m in slot.messages if m["role"] in ("user", "assistant")]
 
         app = _make_app(state)
         async with TestClient(TestServer(app)) as client:
@@ -9532,7 +9625,9 @@ class TestInstalledPackConsentInjection:
             return_value=self.PERSONA,
         ):
             result = _maybe_inject_persona(
-                "hello", "custom-mypack", True,
+                "hello",
+                "custom-mypack",
+                True,
                 theme_consent_sha=self._sha(self.PERSONA),
             )
         assert "[THEME PERSONA]" in result
@@ -9548,7 +9643,9 @@ class TestInstalledPackConsentInjection:
             return_value=self.PERSONA,
         ):
             result = _maybe_inject_persona(
-                "hello", "custom-mypack", True,
+                "hello",
+                "custom-mypack",
+                True,
                 theme_consent_sha=self._sha("OLD PERSONA THE USER CONSENTED TO"),
             )
         assert result == "hello"
@@ -9574,7 +9671,10 @@ class TestInstalledPackConsentInjection:
             return_value=self.PERSONA,
         ):
             result = _maybe_inject_persona(
-                "hello", "custom-mypack", True, theme_consent_sha=None,
+                "hello",
+                "custom-mypack",
+                True,
+                theme_consent_sha=None,
             )
         assert result == "hello"
 
@@ -9586,7 +9686,9 @@ class TestInstalledPackConsentInjection:
             return_value=self.PERSONA,
         ):
             result = _maybe_inject_persona(
-                "hello", "custom-mypack", False,
+                "hello",
+                "custom-mypack",
+                False,
                 theme_consent_sha=self._sha(self.PERSONA),
             )
         assert result == "hello"
@@ -9601,14 +9703,14 @@ class TestInstalledPackConsentInjection:
 
         valid = self._sha(self.PERSONA)
         malformed = [
-            "é",                 # non-ASCII -> would TypeError in compare_digest
-            valid.upper(),       # uppercase hex (raw, un-normalized) -> not 64-lower
-            valid[:-1],          # 63 chars
-            valid + "a",         # 65 chars
-            "",                  # empty
-            "  ",                # whitespace only
-            12345,               # non-str
-            None,                # absent
+            "é",  # non-ASCII -> would TypeError in compare_digest
+            valid.upper(),  # uppercase hex (raw, un-normalized) -> not 64-lower
+            valid[:-1],  # 63 chars
+            valid + "a",  # 65 chars
+            "",  # empty
+            "  ",  # whitespace only
+            12345,  # non-str
+            None,  # absent
             valid[:-2] + "gg",  # non-hex chars
         ]
         with patch(
@@ -9618,7 +9720,10 @@ class TestInstalledPackConsentInjection:
             for bad in malformed:
                 # The call must not raise for any malformed input...
                 result = _maybe_inject_persona(
-                    "hello", "custom-mypack", True, theme_consent_sha=bad,
+                    "hello",
+                    "custom-mypack",
+                    True,
+                    theme_consent_sha=bad,
                 )
                 # ...and must not inject the persona.
                 assert result == "hello", f"unexpected injection for {bad!r}"
@@ -9647,7 +9752,10 @@ class TestInstalledPackConsentInjection:
         ):
             norm = normalize_theme_consent_sha("  " + valid.upper() + "\n")
             result = _maybe_inject_persona(
-                "hello", "custom-mypack", True, theme_consent_sha=norm,
+                "hello",
+                "custom-mypack",
+                True,
+                theme_consent_sha=norm,
             )
         assert "[THEME PERSONA]" in result
 
@@ -9905,7 +10013,9 @@ class TestStopTurnSlotState:
 
         captured_states: list[str] = []
 
-        async def fake_stop_turn(key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None):
+        async def fake_stop_turn(
+            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+        ):
             captured_states.append(slot._stop_state)
             if on_soft:
                 await on_soft()
@@ -9929,7 +10039,9 @@ class TestStopTurnSlotState:
         slot = state.get_or_create_slot("s1")
         slot.task = asyncio.ensure_future(asyncio.sleep(999))
 
-        async def fake_stop_turn(key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None):
+        async def fake_stop_turn(
+            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+        ):
             if on_hard:
                 await on_hard()
             return "hard"
@@ -9954,7 +10066,9 @@ class TestStopTurnSlotState:
 
         force_called = []
 
-        async def fake_stop_turn(key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None):
+        async def fake_stop_turn(
+            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+        ):
             force_called.append(force)
             if on_hard:
                 await on_hard()
@@ -9985,7 +10099,9 @@ class TestStopTurnSlotState:
 
         force_called = []
 
-        async def fake_stop_turn(key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None):
+        async def fake_stop_turn(
+            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+        ):
             force_called.append(force)
             if on_hard:
                 await on_hard()
@@ -10012,7 +10128,9 @@ class TestStopTurnSlotState:
         slot.task = asyncio.ensure_future(asyncio.sleep(999))
         slot._queue.extend(["msg1", "msg2"])
 
-        async def fake_stop_turn(key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None):
+        async def fake_stop_turn(
+            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+        ):
             assert preserve_queue is True
             if on_soft:
                 await on_soft()
@@ -10036,7 +10154,9 @@ class TestStopTurnSlotState:
         slot._stop_state = "soft_pending"
         slot._queue.extend(["msg1", "msg2", "msg3"])
 
-        async def fake_stop_turn(key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None):
+        async def fake_stop_turn(
+            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+        ):
             if on_hard:
                 await on_hard()
             return "hard"
@@ -10058,7 +10178,9 @@ class TestStopTurnSlotState:
         slot.task = asyncio.ensure_future(asyncio.sleep(999))
         assert len(slot._queue) == 0
 
-        async def fake_stop_turn(key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None):
+        async def fake_stop_turn(
+            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+        ):
             assert preserve_queue is True
             if on_soft:
                 await on_soft()
@@ -10082,7 +10204,9 @@ class TestStopTurnSlotState:
         slot._stop_state = "soft_pending"
         assert len(slot._queue) == 0
 
-        async def fake_stop_turn(key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None):
+        async def fake_stop_turn(
+            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+        ):
             if on_hard:
                 await on_hard()
             return "hard"
@@ -10114,7 +10238,9 @@ class TestStopTurnSlotState:
         slot = state.get_or_create_slot("s1")
         slot.task = asyncio.ensure_future(asyncio.sleep(999))
 
-        async def fake_stop_turn(key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None):
+        async def fake_stop_turn(
+            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+        ):
             if on_soft:
                 await on_soft()
             return "soft"
@@ -10152,7 +10278,9 @@ class TestStopTurnSlotState:
         slot = state.get_or_create_slot("s1")
         slot.task = asyncio.ensure_future(asyncio.sleep(999))
 
-        async def fake_stop_turn(key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None):
+        async def fake_stop_turn(
+            key, *, force=False, preserve_queue=False, on_soft=None, on_hard=None
+        ):
             # Verify the stop_event was inserted before callbacks
             stop_msgs = [m for m in slot.messages if _is_stop_event(m)]
             assert len(stop_msgs) == 1
@@ -10300,9 +10428,12 @@ class TestAcpProcessDiedRecovery:
         # ALSO explicitly broadcast over chat_message (slot.append already emits it
         # once via _on_message). A redundant broadcast_ws renders a second card.
         dup_broadcasts = [
-            c for c in state.broadcast_ws.call_args_list
-            if c.args and c.args[0] == "chat_message"
-            and len(c.args) > 1 and "retrying" in c.args[1].get("content", "")
+            c
+            for c in state.broadcast_ws.call_args_list
+            if c.args
+            and c.args[0] == "chat_message"
+            and len(c.args) > 1
+            and "retrying" in c.args[1].get("content", "")
         ]
         assert dup_broadcasts == [], "retry card must not be double-emitted via broadcast_ws"
 
@@ -10522,7 +10653,9 @@ class TestAcpProcessDiedRecovery:
         assert any("Session busy" in m.get("content", "") for m in error_msgs)
 
     @pytest.mark.asyncio
-    async def test_acperror_process_exited_depth_gt0_resets_no_requeue(self, tmp_path: Path) -> None:
+    async def test_acperror_process_exited_depth_gt0_resets_no_requeue(
+        self, tmp_path: Path
+    ) -> None:
         """A pipe-death AcpError ('process exited') at _prompt_depth>0 must STILL reset
         the dead session and increment the pipe-death counter (mirrors AcpProcessDied /
         PromptBusyExhaustedError), and surface a 'Connection lost — please retry' card —
@@ -10599,15 +10732,15 @@ class TestEmptyResponseRetry:
             calls.append(a)
             return orig(self_slot, *a, **kw)
 
-        with patch.object(_ChatSlot, "queue_insert", spy), patch(
-            "kiro_crew.dashboard.chat_runner.save_slot_off_loop"
-        ) as mock_save, patch(
-            "kiro_crew.dashboard.chat_runner._maybe_consolidate"
-        ) as mock_consolidate, patch(
-            "kiro_crew.dashboard.chat_runner._flush_file_changes"
-        ) as mock_flush, patch(
-            "kiro_crew.dashboard.chat_runner._start_next_queued_turn",
-            new=AsyncMock(return_value=False),
+        with (
+            patch.object(_ChatSlot, "queue_insert", spy),
+            patch("kiro_crew.dashboard.chat_runner.save_slot_off_loop") as mock_save,
+            patch("kiro_crew.dashboard.chat_runner._maybe_consolidate") as mock_consolidate,
+            patch("kiro_crew.dashboard.chat_runner._flush_file_changes") as mock_flush,
+            patch(
+                "kiro_crew.dashboard.chat_runner._start_next_queued_turn",
+                new=AsyncMock(return_value=False),
+            ),
         ):
             # The behavior under test is the re-queue itself. Keep the queued
             # item in the slot, but stop the finally block from immediately
@@ -10636,7 +10769,9 @@ class TestEmptyResponseRetry:
         assert mock_flush.call_count == 1
 
     @pytest.mark.asyncio
-    async def test_empty_response_at_depth_gt0_shows_error_immediately(self, tmp_path: Path) -> None:
+    async def test_empty_response_at_depth_gt0_shows_error_immediately(
+        self, tmp_path: Path
+    ) -> None:
         """At _prompt_depth>0 an empty response is NOT silently retried — it shows the
         terminal empty-response notice card on the FIRST empty. The silent
         re-queue is intentionally depth-0 only (nested tool-use turns must not silently
@@ -10711,9 +10846,7 @@ class TestEmptyResponseRetry:
             except Exception:
                 pass
 
-        nudge_msgs = [
-            m for m in slot.messages if m.get("content") == _EMPTY_AUTO_CONTINUE_MSG
-        ]
+        nudge_msgs = [m for m in slot.messages if m.get("content") == _EMPTY_AUTO_CONTINUE_MSG]
         assert nudge_msgs, "drained nudge never reached the transcript"
         # The nudge must NEVER carry the user role (that would persist an
         # internal instruction as user-authored history and mirror it to
@@ -10751,12 +10884,8 @@ class TestEmptyResponseRetry:
         # rather than patching the gate function (which would pass even if the
         # loader dropped the field — the exact regression this test guards).
         cfg_file = tmp_path / "flag-off-config.json"
-        cfg_file.write_text(
-            '{"session": {"empty_response_auto_continue": false}}'
-        )
-        with patch(
-            "kiro_crew.config.loader.config_path", return_value=cfg_file
-        ):
+        cfg_file.write_text('{"session": {"empty_response_auto_continue": false}}')
+        with patch("kiro_crew.config.loader.config_path", return_value=cfg_file):
             await _run_chat(state, slot, "test message")
 
         notice_msgs = [m for m in slot.messages if m.get("role") == "notice"]
@@ -10858,9 +10987,7 @@ class TestExpandDollarSkills:
         from kiro_crew.platform.defaults import DefaultMcpToolingProvider
         from kiro_crew.skills import SkillsLoader
 
-        monkeypatch.setattr(
-            DefaultMcpToolingProvider, "extra_skills", lambda self: []
-        )
+        monkeypatch.setattr(DefaultMcpToolingProvider, "extra_skills", lambda self: [])
         skills_dir = tmp_path / "skills"
         for name, body in skills:
             self._make_skill(skills_dir, name, body)
@@ -10990,9 +11117,7 @@ class TestRunChatTransientRetry:
     backend 5xx WITHOUT resetting the live session, guarded so a partial
     (already-streamed) response is never re-run."""
 
-    _TRANSIENT = (
-        "Prompt error: {'message': 'Internal error: API Error: Internal server error'}"
-    )
+    _TRANSIENT = "Prompt error: {'message': 'Internal error: API Error: Internal server error'}"
     _AUTH = "Bedrock authentication failed. Run 'ada credentials update'"
 
     @staticmethod
@@ -11046,9 +11171,7 @@ class TestRunChatTransientRetry:
         return [m["content"] for m in slot.messages if m.get("role") == "assistant"]
 
     @pytest.mark.asyncio
-    async def test_transient_pre_token_retries_then_recovers_no_reset(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_transient_pre_token_retries_then_recovers_no_reset(self, tmp_path, monkeypatch):
         """A transient 5xx before any token streams is retried on the SAME live
         session (no reset); the second attempt succeeds."""
         from kiro_crew.acp.client import AcpError
@@ -11138,15 +11261,14 @@ class TestRunChatTransientRetry:
         assert any("ok-result" in t for t in assistant), "continued answer must append below"
         # The RE-QUEUED prompt is the CONTINUE instruction, NOT the original.
         assert len(captured) == 2
-        assert "Continue from where it stopped" in captured[1], (
-            "the retry must re-queue the continue instruction, not the original prompt"
-        )
+        assert (
+            "Continue from where it stopped" in captured[1]
+        ), "the retry must re-queue the continue instruction, not the original prompt"
         assert "hello" not in captured[1], "the original prompt must NOT be re-queued"
         # No chat_stream_reset broadcast — that frontend reconcile event was
         # removed entirely by the append-only rework.
         assert not any(
-            c.args and c.args[0] == "chat_stream_reset"
-            for c in state.broadcast_ws.call_args_list
+            c.args and c.args[0] == "chat_stream_reset" for c in state.broadcast_ws.call_args_list
         ), "chat_stream_reset must no longer be broadcast"
         # Live session was NOT reset. The one-shot allowance stays consumed
         # (True) across the synthetic recovery turn — it is refreshed only at the
@@ -11156,9 +11278,7 @@ class TestRunChatTransientRetry:
         assert slot._posttoken_retry_used is True
 
     @pytest.mark.asyncio
-    async def test_transient_post_token_suppressed_preserves_partial(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_transient_post_token_suppressed_preserves_partial(self, tmp_path, monkeypatch):
         """When Stop is active (_should_suppress_requeue True) during a post-token
         transient 5xx, the partial assistant text is PRESERVED (persisted as an
         assistant message) and the message is NOT re-queued. Under the
@@ -11207,8 +11327,7 @@ class TestRunChatTransientRetry:
         assert not any(t.startswith("❌") for t in self._err_texts(slot))
         # No chat_stream_reset broadcast — that event was removed entirely.
         assert not any(
-            c.args and c.args[0] == "chat_stream_reset"
-            for c in state.broadcast_ws.call_args_list
+            c.args and c.args[0] == "chat_stream_reset" for c in state.broadcast_ws.call_args_list
         )
         # Transient path never resets the (still-alive) session.
         state.sessions.reset.assert_not_awaited()
@@ -11266,12 +11385,10 @@ class TestRunChatTransientRetry:
         assert any("Backend hiccup" in t for t in self._err_texts(slot))
         assert not any(t.startswith("❌") for t in self._err_texts(slot))
         # The partial text is preserved and the continued answer appended below.
-        assert any("working" in t for t in self._assistant_texts(slot)), (
-            "partial must be preserved"
-        )
-        assert any("ok-result" in t for t in self._assistant_texts(slot)), (
-            "continued answer must append below"
-        )
+        assert any("working" in t for t in self._assistant_texts(slot)), "partial must be preserved"
+        assert any(
+            "ok-result" in t for t in self._assistant_texts(slot)
+        ), "continued answer must append below"
         # The CONTINUE instruction — not the original prompt — was re-queued.
         assert len(captured) == 2
         assert "Continue from where it stopped" in captured[1]
@@ -11339,9 +11456,7 @@ class TestRunChatTransientRetry:
         assert not any(t.startswith("❌") for t in self._err_texts(slot))
 
     @pytest.mark.asyncio
-    async def test_posttoken_recovery_turn_refailure_does_not_loop(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_posttoken_recovery_turn_refailure_does_not_loop(self, tmp_path, monkeypatch):
         """Finding #3(b): a post-token transient that re-fires DURING the
         synthetic recovery turn must NOT recover again (no infinite re-queue).
         The recovery turn inherits the already-consumed allowance (it is not
@@ -11455,9 +11570,7 @@ class TestRunChatTransientRetry:
         assert slot._transient_5xx_retries == 0
 
     @pytest.mark.asyncio
-    async def test_transient_budget_refreshed_after_terminal_error(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_transient_budget_refreshed_after_terminal_error(self, tmp_path, monkeypatch):
         """Regression: a cycle that EXHAUSTS the transient budget and surfaces
         the terminal ❌ must refresh the budget for the NEXT cycle. The
         happy-path reset only runs when a cycle COMPLETES, so before the fix
@@ -11520,9 +11633,7 @@ class TestRunChatTransientRetry:
         state.sessions.reset.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_transient_after_thinking_only_retries(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_transient_after_thinking_only_retries(self, tmp_path, monkeypatch):
         """A transient 5xx that lands AFTER reasoning streamed but before any
         answer token or tool call is still retried: thinking is ephemeral,
         broadcast-only output, so it does NOT flip _turn_emitted. This pins the
@@ -11666,9 +11777,7 @@ class TestSourceLinkUrlsExcludeIssues:
         state = _make_state(tmp_path)
         slot = state.get_or_create_slot("source")
         pr = "https://github.com/acme/widgets/pull/12"
-        slot.append(
-            "assistant", f"{pr} and https://github.com/acme/widgets/issues/13"
-        )
+        slot.append("assistant", f"{pr} and https://github.com/acme/widgets/issues/13")
 
         assert state.source_link_urls() == [pr]
         assert state.source_link_urls_for_slot("source") == [pr]
@@ -11684,9 +11793,7 @@ class TestSourceLinkUrlsExcludeIssues:
         state.owner_id = "U_OWNER"
         slot = state.get_or_create_slot("source")
         pr = "https://github.com/acme/widgets/pull/12"
-        slot.append(
-            "assistant", f"{pr} and https://github.com/acme/widgets/issues/13"
-        )
+        slot.append("assistant", f"{pr} and https://github.com/acme/widgets/issues/13")
 
         app = _make_app(state)
 
@@ -11747,9 +11854,7 @@ class TestBulkModelSwitch:
         state.push_slots_update = MagicMock()  # mock after creation: get_or_create_slot pushes
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/model", json={"model": "claude-opus-4.8"}
-            )
+            resp = await client.post("/api/chat/slots/model", json={"model": "claude-opus-4.8"})
             data = await resp.json()
 
         assert resp.status == 200
@@ -11770,9 +11875,7 @@ class TestBulkModelSwitch:
         self._mark_running(busy)
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/model", json={"model": "claude-opus-4.8"}
-            )
+            resp = await client.post("/api/chat/slots/model", json={"model": "claude-opus-4.8"})
             data = await resp.json()
 
         assert resp.status == 200
@@ -11811,9 +11914,7 @@ class TestBulkModelSwitch:
         state.push_slots_update = MagicMock()  # mock after creation: get_or_create_slot pushes
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/model", json={"model": "claude-opus-4.8"}
-            )
+            resp = await client.post("/api/chat/slots/model", json={"model": "claude-opus-4.8"})
             data = await resp.json()
 
         assert resp.status == 200
@@ -11834,9 +11935,7 @@ class TestBulkModelSwitch:
         state.push_slots_update = MagicMock()  # mock after creation: get_or_create_slot pushes
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/model", json={"model": "claude-opus-4.8"}
-            )
+            resp = await client.post("/api/chat/slots/model", json={"model": "claude-opus-4.8"})
             data = await resp.json()
 
         assert resp.status == 200
@@ -11867,9 +11966,7 @@ class TestBulkModelSwitch:
         app_obj.middlewares.insert(0, inject_app)
 
         async with TestClient(TestServer(app_obj)) as client:
-            resp = await client.post(
-                "/api/chat/slots/model", json={"model": "claude-opus-4.8"}
-            )
+            resp = await client.post("/api/chat/slots/model", json={"model": "claude-opus-4.8"})
             data = await resp.json()
 
         assert resp.status == 200
@@ -11896,9 +11993,7 @@ class TestBulkModelSwitch:
         bare_app.router.add_post("/api/chat/slots/model", api_chat_slots_model)
 
         async with TestClient(TestServer(bare_app)) as client:
-            resp = await client.post(
-                "/api/chat/slots/model", json={"model": "claude-opus-4.8"}
-            )
+            resp = await client.post("/api/chat/slots/model", json={"model": "claude-opus-4.8"})
 
         assert resp.status == 403
         assert state._slots["a"].model == "claude-opus-4.6"
@@ -11925,9 +12020,7 @@ class TestBulkModelSwitch:
         app_obj.router.add_post("/api/chat/slots/model", api_chat_slots_model)
 
         async with TestClient(TestServer(app_obj)) as client:
-            resp = await client.post(
-                "/api/chat/slots/model", json={"model": "claude-opus-4.8"}
-            )
+            resp = await client.post("/api/chat/slots/model", json={"model": "claude-opus-4.8"})
             data = await resp.json()
 
         assert resp.status == 200
@@ -11958,9 +12051,7 @@ class TestBulkModelSwitch:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/model", json={"model": "fable-5-1m"}
-            )
+            resp = await client.post("/api/chat/slots/model", json={"model": "fable-5-1m"})
             data = await resp.json()
 
         assert resp.status == 400
@@ -11990,9 +12081,7 @@ class TestSlotModelGuard:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "fable-5-1m"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "fable-5-1m"})
             data = await resp.json()
 
         assert resp.status == 400
@@ -12040,9 +12129,7 @@ class TestSlotModelGuard:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "claude-opus-4.8"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "claude-opus-4.8"})
 
         assert resp.status == 200
         assert state._slots["a"].model == "claude-opus-4.8"
@@ -12102,9 +12189,7 @@ class TestSlotModelLiveSwitch:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"})
 
         assert resp.status == 200
         assert state._slots["a"].model == "gpt-5.6-sol"
@@ -12125,9 +12210,7 @@ class TestSlotModelLiveSwitch:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "claude-opus-4.8"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "claude-opus-4.8"})
 
         assert resp.status == 200
         sent = provider.client.set_model.await_args.args[0]
@@ -12147,9 +12230,7 @@ class TestSlotModelLiveSwitch:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"})
 
         assert resp.status == 200
         provider.client.set_model.assert_not_awaited()
@@ -12166,9 +12247,7 @@ class TestSlotModelLiveSwitch:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"})
 
         # The slot still lands on the new model, via the reset path.
         assert resp.status == 200
@@ -12240,9 +12319,7 @@ class TestSlotModelLiveSwitch:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "claude-opus-4.8"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "claude-opus-4.8"})
 
         assert resp.status == 200
         sent = provider.client.set_model.await_args.args[0]
@@ -12260,9 +12337,7 @@ class TestSlotModelLiveSwitch:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"})
 
         assert resp.status == 200
         assert state._slots["a"].model == "gpt-5.6-sol"
@@ -12278,9 +12353,7 @@ class TestSlotModelLiveSwitch:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"})
 
         assert resp.status == 200
         provider.client.set_model.assert_not_awaited()
@@ -12303,9 +12376,7 @@ class TestSlotModelLiveSwitch:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "claude-opus-4.8"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "claude-opus-4.8"})
 
         assert resp.status == 200
         provider.change_effort.assert_awaited_once_with("high")
@@ -12324,9 +12395,7 @@ class TestSlotModelLiveSwitch:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "claude-opus-4.8"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "claude-opus-4.8"})
 
         assert resp.status == 200
         state.sessions.reset.assert_awaited_once()
@@ -12343,9 +12412,7 @@ class TestSlotModelLiveSwitch:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "claude-opus-4.8"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "claude-opus-4.8"})
 
         assert resp.status == 200
         state.sessions.reset.assert_awaited_once()
@@ -12363,9 +12430,7 @@ class TestSlotModelLiveSwitch:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "claude-haiku-4.5"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "claude-haiku-4.5"})
 
         assert resp.status == 200
         provider.change_effort.assert_not_awaited()
@@ -12387,9 +12452,7 @@ class TestSlotModelLiveSwitch:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "claude-opus-4.8"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "claude-opus-4.8"})
 
         assert resp.status == 200
         provider.clear_effort.assert_awaited_once()
@@ -12420,9 +12483,7 @@ class TestSlotModelLiveSwitch:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "claude-opus-4.8"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "claude-opus-4.8"})
             body = await resp.json()
 
         assert resp.status == 400
@@ -12471,9 +12532,7 @@ class TestSlotModelSwitchContextBroadcast:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"})
 
         assert resp.status == 200
         events = self._find_context_events(state.broadcast_ws)
@@ -12499,9 +12558,7 @@ class TestSlotModelSwitchContextBroadcast:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"})
 
         assert resp.status == 200
         state.sessions.reset.assert_awaited_once()
@@ -12518,9 +12575,7 @@ class TestSlotModelSwitchContextBroadcast:
         state.push_slots_update = MagicMock()
 
         async with TestClient(TestServer(self._app(state))) as client:
-            resp = await client.post(
-                "/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"}
-            )
+            resp = await client.post("/api/chat/slots/a/model", json={"model": "gpt-5.6-sol"})
 
         assert resp.status == 200
         assert state._slots["a"].model == "gpt-5.6-sol"
@@ -12547,9 +12602,7 @@ class TestForkSlotTail:
         the B1 gate test below overrides this to False for its own assertion."""
         mock_cfg = MagicMock()
         mock_cfg.dashboard.tail_fork_enabled = True
-        monkeypatch.setattr(
-            "kiro_crew.dashboard.chat_fork.KiroCrewConfig.load", lambda: mock_cfg
-        )
+        monkeypatch.setattr("kiro_crew.dashboard.chat_fork.KiroCrewConfig.load", lambda: mock_cfg)
 
     @pytest.mark.asyncio
     async def test_tail_fork_keeps_messages_after_index(self, tmp_path):
@@ -12671,9 +12724,7 @@ class TestForkSlotTail:
         """B1 gate (D1): tail_fork_enabled=False silently downgrades tail -> head."""
         mock_cfg = MagicMock()
         mock_cfg.dashboard.tail_fork_enabled = False
-        monkeypatch.setattr(
-            "kiro_crew.dashboard.chat_fork.KiroCrewConfig.load", lambda: mock_cfg
-        )
+        monkeypatch.setattr("kiro_crew.dashboard.chat_fork.KiroCrewConfig.load", lambda: mock_cfg)
         state = _make_state(tmp_path)
         _make_tail_fork_slot(state)
 
