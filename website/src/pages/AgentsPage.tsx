@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { Star, Brain, Plug, Pin, Package, Lock, Hourglass, Bot, ChevronDown, LayoutTemplate, X } from 'lucide-react'
+import { Star, Brain, Plug, Pin, Package, Lock, Hourglass, Bot, ChevronDown, LayoutTemplate, X, Plus } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { useAppSelector } from '../store'
 import { api } from '../api/client'
@@ -9,6 +9,7 @@ import Clickable from '../components/Clickable'
 import { SourceBadge, PageHeader, EmptyState, Btn, Input, SearchInput, Card, CardTitle, Badge } from '../components/ui'
 import ModelDropdownList from '../components/ModelDropdownList'
 import AgentSkillsEditor from '../components/AgentSkillsEditor'
+import AgentTemplateCreator from '../components/AgentTemplateCreator'
 import SimpleSelect from '../components/SimpleSelect'
 import CrewAvatar from '../components/CrewAvatar'
 import type { KiroCrewAgent } from '../components/AgentSelector'
@@ -334,6 +335,17 @@ export default function AgentsPage({ embedded }: { embedded?: boolean } = {}) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const modelOptions = useAvailableModels()
+  const [creatorOpen, setCreatorOpen] = useState(false)
+  // A just-created template is selected as soon as its detail loads, so the
+  // authoring flow lands the user on the inspector view of what they made.
+  const onTemplateCreated = async (name: string) => {
+    setCreatorOpen(false)
+    refetchInstalled()
+    try {
+      const d = await api.agentDetail(name)
+      setSelectedAgent(d)
+    } catch { /* list refresh alone still shows the new row */ }
+  }
   const { open: modelDropOpen, setOpen: setModelDropOpen, filter: modelFilter, setFilter: setModelFilter, dropdownRef: modelDropRef, inputRef: modelInputRef, filtered: filteredModels } = useFilteredDropdown(modelOptions)
   // Roving-focus keyboard nav for the model dropdown (shared with StyledSelect/AgentSelector).
   const { onListKeyDown: onModelListKeyDown } = useListboxKeyboard({
@@ -573,6 +585,7 @@ export default function AgentsPage({ embedded }: { embedded?: boolean } = {}) {
               icon={<LayoutTemplate className="lucide-inline" aria-hidden="true" />}
               title={i18nT('pages.agentsPage.no_agent_templates_yet')}
               subtitle={i18nT('pages.agentsPage.templates_come_with_kirocrew_or_with_an_app_you_i')}
+              action={<Btn primary onClick={() => setCreatorOpen(true)}><Plus className="lucide-inline" /> {i18nT('pages.agentsPage.create_template')}</Btn>}
             />
           </div>
         ) : (
@@ -582,7 +595,7 @@ export default function AgentsPage({ embedded }: { embedded?: boolean } = {}) {
              denied-command list instead of scrolling it inside a short box. */
           <div className="card-glow border border-border bg-card rounded-lg mb-4 animate-rise shadow-sm transition-all overflow-hidden flex h-[62vh] min-h-[420px] max-h-[760px]">
             <div className="w-[288px] shrink-0 border-r border-border flex flex-col bg-bg-accent">
-              <div className="p-2.5 border-b border-border">
+              <div className="p-2.5 border-b border-border flex flex-col gap-2">
                 <SearchInput
                   className="w-full"
                   placeholder={i18nT('pages.agentsPage.filter_templates')}
@@ -590,6 +603,7 @@ export default function AgentsPage({ embedded }: { embedded?: boolean } = {}) {
                   value={filter}
                   onChange={e => setFilter(e.target.value)}
                 />
+                <Btn primary onClick={() => setCreatorOpen(true)} className="w-full justify-center text-[12px] py-1.5"><Plus className="lucide-inline" /> {i18nT('pages.agentsPage.create_template')}</Btn>
               </div>
               <div className="flex-1 overflow-y-auto p-2">
                 {filtered.length === 0 ? (
@@ -869,6 +883,14 @@ export default function AgentsPage({ embedded }: { embedded?: boolean } = {}) {
         {usage && <ProviderUsageCard usage={usage} />}
         <SubagentsCard agents={agents} onClear={() => spawnClearMut.mutate()} onDelete={id => spawnDeleteMut.mutate(id)} />
       </div>
+      <AgentTemplateCreator
+        open={creatorOpen}
+        onClose={() => setCreatorOpen(false)}
+        onCreated={onTemplateCreated}
+        modelOptions={modelOptions.map(m => m.name)}
+        existingNames={installed.map(a => a.name)}
+        mcpServerNames={Object.keys(mcpTools)}
+      />
     </>
   )
 }
