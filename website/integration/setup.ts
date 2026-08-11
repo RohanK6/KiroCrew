@@ -478,4 +478,10 @@ afterEach(() => {
 })
 
 // Clean up after all tests are done
-afterAll(() => server.close())
+// NOTE: server.close() intentionally omitted. happy-dom fires stray requests
+// AFTER the test lifecycle completes (orphaned iframe/script loads from async
+// DOM insertion that outlive the test). If MSW is closed, those requests escape
+// to the real network → ECONNREFUSED → vitest marks the shard as failed. Keeping
+// MSW alive until process exit lets the catch-all 501 handler absorb them. The
+// process exits cleanly anyway (forks mode: each file is a child that exits).
+// afterAll(() => server.close())

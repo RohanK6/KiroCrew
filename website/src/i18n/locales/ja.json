@@ -6374,6 +6374,13 @@
       "verdict_toggle": "認識しました。実際のチャットではこの操作で録音が始まり、次に押すと停止します。",
       "verdict_wrong_key": "押されたのは {{got}} で、上で選んだ {{want}} ではありません。お使いのキーボードにそのキーがない場合は、「{{field}}」で別のキーを選んでください。"
     },
+    "skillsMultiSelect": {
+      "add_skill": "Add skill",
+      "remove_skill": "Remove {{name}}",
+      "filter_skills": "Filter skills...",
+      "no_matching_skills": "No matching skills",
+      "skills_hint": "Skills loaded when this hook matches — no command needed."
+    },
     "gitPanel": {
       "changes": "変更",
       "clean": "クリーン",
@@ -8299,7 +8306,8 @@
       "timeout": "タイムアウト",
       "total": "合計",
       "total_runs": "総実行回数",
-      "user": "ユーザー"
+      "user": "ユーザー",
+      "matcher_mode": "Matcher mode"
     },
     "kiroCrewAgentsPage": {
       "a_unique_identifier_for_this_workspace_agents_re": "このワークスペースの一意な識別子。エージェントは名前でワークスペースを参照します。",

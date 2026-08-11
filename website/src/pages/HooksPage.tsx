@@ -3,6 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query'
 import { AlertTriangle, Anchor, Link2, Lock } from 'lucide-react'
 import { api } from '../api/client'
 import { useProvider } from '../providers'
+import SkillsMultiSelect from '../components/SkillsMultiSelect'
 import { Card, CardTitle, PageHeader, StatCard, Btn, SendBtn, Input, Badge, SearchInput, EmptyState } from '../components/ui'
 import InfoTip from '../components/InfoTip'
 import SimpleSelect from '../components/SimpleSelect'
@@ -14,7 +15,8 @@ import SortableHeader from '../components/SortableHeader'
 import { i18nT } from '../i18n/t'
 interface Hook {
   id: string; name: string; event: string; matcher: string
-  command: string; timeout: number; enabled: boolean
+  matcher_mode: string; command: string; skills: string[]
+  timeout: number; enabled: boolean
   last_run: number; last_status: string; run_count: number
 }
 
@@ -28,6 +30,7 @@ interface HookTestResult {
 }
 
 const EVENTS = ['AgentSpawn', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop']
+const MATCHER_MODES = ['glob', 'regex', 'contains']
 
 const EVENT_STYLE: Record<string, string> = {
   AgentSpawn: 'bg-accent/15 text-accent border-accent/30',
@@ -57,7 +60,9 @@ function HookForm({ hook, onSave, onCancel }: {
   const [name, setName] = useState(hook?.name || '')
   const [event, setEvent] = useState(hook?.event || 'UserPromptSubmit')
   const [matcher, setMatcher] = useState(hook?.matcher || '')
+  const [matcherMode, setMatcherMode] = useState(hook?.matcher_mode || 'glob')
   const [command, setCommand] = useState(hook?.command || '')
+  const [skills, setSkills] = useState<string[]>(hook?.skills || [])
   const [timeout, setTimeout_] = useState(hook?.timeout || 30)
   const isToolHook = event === 'PreToolUse' || event === 'PostToolUse'
 
@@ -84,12 +89,25 @@ function HookForm({ hook, onSave, onCancel }: {
         </div>
         <div className="flex gap-2 items-center flex-wrap">
           <Input placeholder={isToolHook ? i18nT('pages.hooksPage.matcher_tool_filter_e_g_fs_write_git') : i18nT('pages.hooksPage.matcher_optional_e_g_deploy')} value={matcher} onChange={e => setMatcher(e.target.value)} />
+          {!isToolHook && (
+            <SimpleSelect
+              options={MATCHER_MODES}
+              value={matcherMode}
+              onChange={setMatcherMode}
+              aria-label={i18nT('pages.hooksPage.matcher_mode')}
+            />
+          )}
           <div className="flex items-center gap-1.5 text-[13px] text-muted shrink-0">
             <span>{i18nT('pages.hooksPage.timeout')}</span>
             <Input type="number" min={1} max={300} className="w-16" value={timeout} onChange={e => setTimeout_(parseInt(e.target.value, 10) || 30)} />
             <span>{i18nT('pages.hooksPage.s')}</span>
           </div>
-          <SendBtn onClick={() => onSave({ name, event, matcher, command, timeout })}>{i18nT('pages.hooksPage.save')}</SendBtn>
+        </div>
+        <div>
+          <SkillsMultiSelect selected={skills} onChange={setSkills} />
+        </div>
+        <div className="flex gap-2 items-center">
+          <SendBtn onClick={() => onSave({ name, event, matcher, matcher_mode: matcherMode, command, skills, timeout })}>{i18nT('pages.hooksPage.save')}</SendBtn>
           <Btn onClick={onCancel} className="h-9 px-4 text-sm font-semibold rounded-lg">{i18nT('pages.hooksPage.cancel')}</Btn>
         </div>
       </div>
