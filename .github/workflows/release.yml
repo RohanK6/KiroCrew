@@ -1,0 +1,456 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# All build/sign/notarize/publish logic lives in reusable workflows shared
+# with nightly.yml (build-wheel.yml, build-desktop.yml, publish-cli.yml,
+# sign-and-notarize.yml). This file owns only what is genuinely
+# release-specific: the tag trigger, the tag -> version/channel derivation,
+# and the GitHub Release job.
+
+# Serialize release runs: insider/stable feed writes are last-writer-wins;
+# two tags pushed close together must publish in order or the channel feed
+# can roll back to the older release (see nightly.yml for the full note).
+concurrency:
+  group: release-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Channel from the tag: pre-release tags (v1.2.3-insider.1, -rc.1, etc.)
+  # release on the insider channel; bare semver tags are stable.
+  version:
+    name: Derive Version + Channel
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.channel.outputs.version }}
+      channel: ${{ steps.channel.outputs.channel }}
+      wheel_version: ${{ steps.channel.outputs.wheel_version }}
+    steps:
+      - name: Derive version + channel from tag
+        id: channel
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          case "$VERSION" in
+            *-*)
+              CHANNEL="insider"
+              # The pip wheel needs a valid PEP 440 version; semver prerelease
+              # labels ("-insider.4", "-rc.2") are not one, and setuptools
+              # would silently normalize an invalid stamp down to the base
+              # version -- making two insider releases collide on the same
+              # immutable cli/<channel>/<version>/ key. Map any prerelease to
+              # rcN using its trailing number: 1.2.3-insider.4 -> 1.2.3rc4.
+              # (Corollary: do not tag both v1.2.3-insider.N and v1.2.3-rc.N
+              # -- they map to the same wheel version, and publish-cli's
+              # conditional write would fail the second as a republish.)
+              BASE="${VERSION%%-*}"
+              PRE="${VERSION#*-}"
+              N="${PRE##*.}"
+              case "$N" in
+                ''|*[!0-9]*) N=0 ;;
+              esac
+              WHEEL_VERSION="${BASE}rc${N}"
+              ;;
+            *)
+              CHANNEL="stable"
+              WHEEL_VERSION="$VERSION"
+              ;;
+          esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "wheel_version=$WHEEL_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION on channel $CHANNEL (wheel: $WHEEL_VERSION)"
+
+  # ── Stable publication gate ───────────────────────────────────────────
+  # A tag name is the ONLY thing that decides the channel, and the whole run
+  # is unattended: on v0.1.3 the stable CLI wheel was public 3m41s after the
+  # tag push, CDN keys are immutable (a republish is refused), and
+  # `cancel-in-progress: false` means a corrected tag queues behind rather
+  # than superseding. So `v0.2.0-rc.2` mistyped as `v0.2.0` is an
+  # unrecoverable stable release, and there is no window in which anyone
+  # would notice. This job is the missing precondition check.
+  #
+  # DETERMINISTIC, NOT A PROMPT. An approval button is the other obvious
+  # design; it is deliberately not this one, because the failure mode here is
+  # a typo by someone who believes they are shipping a prerelease — exactly
+  # the state of mind that clicks through a confirmation. These two checks
+  # instead ask for evidence the release was intended, and a mistyped bare
+  # tag cannot produce that evidence.
+  #
+  # WHY IT NEVER USES `if:`. The publish jobs `needs` this one, and a SKIPPED
+  # dependency skips its dependents — an `if: channel == 'stable'` here would
+  # silently stop insider and nightly from publishing at all. The channel test
+  # therefore lives INSIDE the step, which always runs and exits 0 for every
+  # non-stable channel.
+  #
+  # Validated against history: both prior stable releases promote the exact
+  # commit their last insider tag shipped (v0.1.2 == v0.1.2-insider.4,
+  # v0.1.3 == v0.1.3-insider.2), so check 2 encodes practice that already
+  # holds rather than imposing a new one. Check 1 would have blocked v0.1.3,
+  # which shipped with no CHANGELOG section — that is the check working, and
+  # it means a stable release now requires its section to be written first.
+  stable-gate:
+    name: Stable publication gate
+    needs: [version]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Replaces the workflow default: `actions: read` is what lets the promotion
+    # check ask whether a prerelease tag's release run actually SUCCEEDED.
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so the stable tag resolves unambiguously, and so the
+          # CHANGELOG read is of the tagged commit rather than a partial tree.
+          fetch-depth: 0
+      - name: Verify stable publication preconditions
+        env:
+          CHANNEL: ${{ needs.version.outputs.channel }}
+          VERSION: ${{ needs.version.outputs.version }}
+          # Scoped to ONE version on purpose: it must equal the version being
+          # released, so it cannot be left switched on for every future tag.
+          OVERRIDE: ${{ vars.STABLE_GATE_OVERRIDE }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [ "$CHANNEL" != "stable" ]; then
+            echo "channel=$CHANNEL -- the stable gate does not apply."
+            exit 0
+          fi
+
+          failures=0
+
+          # ── 1. The release is documented ────────────────────────────────
+          # Heading form is `## [0.1.2] — 2026-07-30`. Matched as a LITERAL
+          # prefix through awk's index(), never as a regex: an unescaped
+          # `0.1.3` pattern would also be satisfied by a `## [0.1.31]` or
+          # `## [0y1z3]` heading, and a version string is exactly the kind of
+          # value whose dots must stay literal.
+          if awk -v want="## [$VERSION]" \
+               'index($0, want) == 1 { found = 1 } END { exit !found }' \
+               CHANGELOG.md; then
+            echo "changelog: CHANGELOG.md documents $VERSION"
+          else
+            echo "::error::CHANGELOG.md has no '## [$VERSION]' section. A stable release must be documented before it ships."
+            failures=$((failures + 1))
+          fi
+
+          # ── 2. Stable only promotes bytes insiders actually received ─────
+          # A TAG IS NOT EVIDENCE OF A RELEASE. A cancelled or failed
+          # prerelease run leaves its tag behind, so matching on tag names
+          # alone would let stable promote a candidate that never shipped
+          # (GPT 5.6 review on 2ce9bcef). The evidence is a SUCCESSFUL
+          # release-workflow run for a v<version>-* tag at this exact commit.
+          #
+          # Queried from GitHub's own API rather than the distribution CDN: an
+          # API outage already means this run is not happening, whereas a CDN
+          # blip is an unrelated failure that must not block a legitimate
+          # release (the objection #1031 raises elsewhere in this pipeline).
+          # A failed query FAILS CLOSED and says so -- a check that could not
+          # run is not a check that passed.
+          #
+          # The tag lookup is GUARDED rather than left to `set -e`: an absent
+          # tag would otherwise abort the script mid-way with git's own
+          # "ambiguous argument" fatal, skipping both the failure summary and
+          # the override path.
+          STABLE_COMMIT=""
+          if ! STABLE_COMMIT="$(git rev-list -n 1 "refs/tags/v$VERSION" 2>/dev/null)"; then
+            echo "::error::tag v$VERSION is not present in this checkout, so the promotion check cannot run. A deleted or unfetched tag fails closed."
+            failures=$((failures + 1))
+          else
+            # Exported so the jq program reads it through `env` instead of
+            # having a value spliced into the filter text.
+            export STABLE_COMMIT
+            # gh exits NON-ZERO on an API failure and zero-with-no-output when
+            # nothing matched. That distinction is the whole point: it
+            # separates "checked, and no such release exists" from "could not
+            # check", and only the first is a verdict.
+            if ! promoted="$(gh api --paginate \
+                 "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?event=push&status=success&per_page=100" \
+                 --jq '.workflow_runs[]
+                       | select(.head_sha == env.STABLE_COMMIT)
+                       | select(.head_branch | startswith("v" + env.VERSION + "-"))
+                       | .head_branch' 2>&1)"; then
+              echo "::error::could not list successful release runs, so the promotion check could not run: $promoted"
+              failures=$((failures + 1))
+            elif [ -n "$promoted" ]; then
+              echo "promotion: $(printf '%s' "$promoted" | head -n 1) published $STABLE_COMMIT in a successful release run"
+            else
+              echo "::error::no SUCCESSFUL release run for a v$VERSION-* tag at $STABLE_COMMIT. Stable must promote a commit that already shipped to insider -- a prerelease tag whose run was cancelled or failed does not count."
+              failures=$((failures + 1))
+            fi
+          fi
+
+          if [ "$failures" -eq 0 ]; then
+            echo "stable gate: both preconditions satisfied for $VERSION"
+            exit 0
+          fi
+
+          if [ "${OVERRIDE:-}" = "$VERSION" ]; then
+            echo "::warning::stable gate overridden for $VERSION by vars.STABLE_GATE_OVERRIDE ($failures unmet precondition(s))."
+            exit 0
+          fi
+
+          echo "::error::stable publication of $VERSION blocked by $failures unmet precondition(s). Fix them, or set the repository variable STABLE_GATE_OVERRIDE to exactly '$VERSION' to release anyway."
+          exit 1
+
+  dependency-vulnerability-gate:
+    name: Production Dependency Vulnerability Gate
+    uses: ./.github/workflows/dependency-vulnerability.yml
+
+  build-wheel:
+    name: Build Wheel
+    needs: [version, dependency-vulnerability-gate]
+    uses: ./.github/workflows/build-wheel.yml
+    with:
+      wheel_version: ${{ needs.version.outputs.wheel_version }}
+
+  build-desktop:
+    name: Build Desktop
+    needs: [version, dependency-vulnerability-gate]
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  # Windows builds in its own workflow because it Authenticode-signs during the
+  # build (the Squirrel installer embeds already-signed executables), so unlike
+  # build-desktop.yml it needs OIDC. Keeping it separate is what lets
+  # build-desktop.yml stay credential-free. use_prod_environment is what makes
+  # signing work on a release at all: these runs are tag-triggered
+  # (ref:refs/tags/v*), which the signing role does NOT trust. Installer-only
+  # (publishes nothing): soft_fail keeps a Windows failure from skipping
+  # publish-linux / sign-and-notarize via this caller's result.
+  build-windows:
+    name: Build Windows Desktop
+    needs: [version, dependency-vulnerability-gate]
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      soft_fail: true
+      use_prod_environment: true
+    secrets: inherit
+
+  # ── CLI channel publish ───────────────────────────────────────────────
+  # Publishes the release wheel to the insider/stable CLI channel (cli/ +
+  # latest-cli.json + PEP 503 index) -- previously release wheels only
+  # reached GitHub Releases, so pip/cli.sh users could never track insider
+  # or stable. Depends only on the wheel and its CLI-specific KMS manifest signer
+  # (not build-desktop, Apple notarization, or CDSigner), so a macOS signing
+  # failure never blocks the CLI release.
+  publish-cli:
+    name: Publish CLI (${{ needs.version.outputs.channel }} channel)
+    needs: [version, stable-gate, build-wheel]
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/publish-cli.yml
+    with:
+      channel: ${{ needs.version.outputs.channel }}
+      version: ${{ needs.version.outputs.version }}
+      wheel_artifact: cli-wheel
+    secrets: inherit
+
+  # ── Linux desktop publish ─────────────────────────────────────────────
+  # Publishes the release AppImages to the distribution CDN (versioned key +
+  # latest alias). Its own lane beside publish-cli, deliberately NOT inside
+  # sign-and-notarize.yml: the Linux artifact takes no part in the macOS
+  # trust chain, and needing only build-desktop means neither a wheel nor a
+  # macOS signing failure can block it (per-platform releases).
+  #
+  # ONE JOB PER ARCH, not a matrix over `arch`: each arch owns a distinct S3
+  # key, feed file and alias, and separate jobs keep the per-arch publish
+  # status visible in the run graph.
+  #
+  # Scope of that separation, stated precisely because the obvious reading is
+  # wrong: it decouples the PUBLISH steps, not the BUILDS. Both publishers
+  # still `needs: build-desktop`, which is the reusable-workflow caller job
+  # aggregating BOTH matrix legs, so a failed arm64 build skips the x64
+  # publish too. That is deliberate for now -- the versioned S3 keys are
+  # immutable, so publishing half a release and then discovering the other
+  # arch never built is the worse failure -- but it does mean a broken arm64
+  # build can hold up an x64 release, which was not true before this lane
+  # existed. True per-arch publish independence needs the publishers to run
+  # past a partial build failure and let their own artifact download decide;
+  # tracked in #2645 rather than reshaped here.
+  publish-linux-x64:
+    name: Publish Linux Desktop (${{ needs.version.outputs.channel }} channel · x64)
+    needs: [version, stable-gate, build-desktop]
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/publish-linux.yml
+    with:
+      channel: ${{ needs.version.outputs.channel }}
+      version: ${{ needs.version.outputs.version }}
+      arch: x64
+      publish: true
+      appimage_artifact: build-linux-x64
+    secrets: inherit
+
+  publish-linux-arm64:
+    name: Publish Linux Desktop (${{ needs.version.outputs.channel }} channel · arm64)
+    needs: [version, stable-gate, build-desktop]
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/publish-linux.yml
+    with:
+      channel: ${{ needs.version.outputs.channel }}
+      version: ${{ needs.version.outputs.version }}
+      arch: arm64
+      publish: true
+      appimage_artifact: build-linux-arm64
+    secrets: inherit
+
+  # ── Docker image publish ──────────────────────────────────────────────
+  # Multi-arch gateway image from the SAME wheel publish-cli ships, pushed
+  # to ghcr.io with the workflow's own GITHUB_TOKEN (no AWS credentials).
+  # Depends only on the wheel — a macOS signing failure never blocks the
+  # image (per-platform releases). Channel alias insider|stable; stable
+  # also moves :latest.
+  publish-docker:
+    name: Publish Docker Image (${{ needs.version.outputs.channel }} channel)
+    needs: [version, stable-gate, build-wheel]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/publish-docker.yml
+    with:
+      channel: ${{ needs.version.outputs.channel }}
+      version: ${{ needs.version.outputs.version }}
+      publish: true
+      # The GHCR package is public: README tells users to `docker pull` it
+      # anonymously, so a release that lands behind a private package is a
+      # broken release. Fail the lane rather than advertise an unpullable tag.
+      require_public_access: true
+      wheel_artifact: cli-wheel
+    # No `secrets: inherit`: the lane authenticates with GITHUB_TOKEN only
+    # (implicitly available to reusable workflows). Inheriting would expose
+    # every repo secret (signing, CDN) to a lane documented as needing none.
+
+  # Caller job for the reusable sign-and-notarize workflow: a workflow_call
+  # callee can never exceed the caller job's permissions, so the caller must
+  # grant id-token explicitly. The signing job holds AWS creds (id-token)
+  # but never contents:write -- that lives only in the separate
+  # github-release job below (least-privilege split enforced by
+  # test_workflow_permissions.py).
+  sign-and-notarize:
+    name: Sign + Notarize macOS
+    needs: [version, stable-gate, build-wheel, build-desktop]
+    permissions:
+      id-token: write
+      contents: read
+      attestations: write
+    uses: ./.github/workflows/sign-and-notarize.yml
+    secrets: inherit
+    with:
+      channel: ${{ needs.version.outputs.channel }}
+      version: ${{ needs.version.outputs.version }}
+      write_feed: true
+
+  github-release:
+    name: Create GitHub Release
+    needs: [version, stable-gate, sign-and-notarize]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+
+      # Assemble release assets: everything built, with macOS assets accepted
+      # only from the exact gated artifact emitted after notarization, stapling,
+      # and Gatekeeper verification. The unsigned electron-builder zip/DMG are
+      # inter-job inputs only and must never become GitHub Release assets.
+      - name: Assemble release assets (require gated macOS artifacts)
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find artifacts -type f \( -name "*.whl" -o -name "*.tar.gz" -o -name "*.AppImage" \) -exec cp {} release/ \;
+
+          NOTARIZED_DIR="artifacts/KiroCrew-notarized-${{ needs.version.outputs.channel }}-${{ needs.version.outputs.version }}"
+          NOTARIZED_ZIP="${NOTARIZED_DIR}/notarized.zip"
+          NOTARIZED_DMG="${NOTARIZED_DIR}/KiroCrew.dmg"
+          [ -s "$NOTARIZED_ZIP" ] || {
+            echo "::error::Required gated macOS ZIP is missing or empty: ${NOTARIZED_ZIP}"
+            exit 1
+          }
+          [ -s "$NOTARIZED_DMG" ] || {
+            echo "::error::Required gated macOS DMG is missing or empty: ${NOTARIZED_DMG}"
+            exit 1
+          }
+
+          # Fail closed on corrupt or mis-shaped handoff files before granting
+          # the GitHub Release job's contents:write capability to publish them.
+          # Cryptographic Gatekeeper checks happen immediately before the
+          # notarize job uploads this exact, name-bound artifact.
+          python3 - "$NOTARIZED_ZIP" "$NOTARIZED_DMG" <<'PY_VALIDATE'
+          from pathlib import Path, PurePosixPath
+          import sys
+          import zipfile
+
+          zip_path = Path(sys.argv[1])
+          dmg_path = Path(sys.argv[2])
+
+          try:
+              with zipfile.ZipFile(zip_path) as archive:
+                  corrupt_member = archive.testzip()
+                  names = archive.namelist()
+          except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+              raise SystemExit(f"::error::{zip_path} is not a valid ZIP archive: {exc}")
+
+          if corrupt_member is not None:
+              raise SystemExit(
+                  f"::error::{zip_path} failed its CRC check at {corrupt_member}"
+              )
+          app_roots = {
+              parts[0]
+              for name in names
+              if (parts := PurePosixPath(name).parts) and parts[0].endswith(".app")
+          }
+          if len(app_roots) != 1:
+              raise SystemExit(
+                  f"::error::{zip_path} must contain exactly one top-level .app; "
+                  f"found {sorted(app_roots)}"
+              )
+
+          try:
+              if dmg_path.stat().st_size < 512:
+                  raise ValueError("file is smaller than the 512-byte UDIF trailer")
+              with dmg_path.open("rb") as dmg:
+                  dmg.seek(-512, 2)
+                  signature = dmg.read(4)
+              if signature != b"koly":
+                  raise ValueError("UDIF trailer signature is missing")
+          except (OSError, ValueError) as exc:
+              raise SystemExit(f"::error::{dmg_path} is not a valid UDIF DMG: {exc}")
+          PY_VALIDATE
+
+          cp "$NOTARIZED_ZIP" "release/KiroCrew-${{ needs.version.outputs.version }}-universal-mac.zip"
+          cp "$NOTARIZED_DMG" "release/KiroCrew-${{ needs.version.outputs.version }}-universal.dmg"
+          ls -la release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          generate_release_notes: true
+          prerelease: ${{ needs.version.outputs.channel == 'insider' }}
+          files: release/*
