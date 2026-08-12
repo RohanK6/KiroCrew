@@ -3509,6 +3509,14 @@ async def start_dashboard(
     # degrades to TCP-only on any failure — see _start_unix_site).
     _unix_socket_holder["path"] = await _start_unix_site(runner, port)
 
+    # Port bind succeeded — export the port so child processes (sandboxes,
+    # mcp-core, kiro-cli sessions) can discover it via env instead of parsing
+    # dashboard.url (which may be a portless URL behind a reverse proxy or
+    # custom domain).  Without this, _resolve_api_base() in mcp_core.py falls
+    # to _DEFAULT_PORT when the URL has no explicit port and KIROCREW_PORT is
+    # unset, breaking spawn_run and all other mcp-core → gateway HTTP calls.
+    os.environ["KIROCREW_PORT"] = str(port)
+
     # Port bind succeeded — now safe to write the secret file. Offloaded:
     # _write_secret_file does blocking fs I/O (os.open/os.close and, on Windows,
     # an icacls subprocess via restrict_to_owner), so it must not run on the
@@ -4082,6 +4090,10 @@ async def start_api_server(
     # Additional kernel-verifiable transport for the internal API (parity with
     # start_dashboard; POSIX only, degrades to TCP-only on any failure).
     _unix_socket_holder["path"] = await _start_unix_site(runner, port)
+
+    # Port bind succeeded — export for child-process discovery (parity with
+    # start_dashboard; see the comment there for the full rationale).
+    os.environ["KIROCREW_PORT"] = str(port)
 
     # Port bind succeeded — now safe to persist the secret file (parity with
     # start_dashboard: write deferred so a failed bind can't poison it).
