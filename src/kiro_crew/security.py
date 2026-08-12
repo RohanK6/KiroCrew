@@ -8184,3 +8184,51 @@ def apply_resource_limits(config: dict | None = None) -> "Callable[[], None]":
         _bias_child_oom_score()
 
     return _set_limits
+
+
+# ── MCP Environment Variable Credential Detection ──────────────────
+# Shared predicates for rejecting literal secrets in MCP server env blocks.
+
+MCP_ENV_SECRET_KEY_TOKENS: frozenset[str] = frozenset({
+    "SECRET", "TOKEN", "PASSWORD", "PASSWD", "APIKEY",
+    "CREDENTIAL", "CREDENTIALS", "AUTHORIZATION", "AUTH",
+})
+
+MCP_ENV_SECRET_TOKEN_PAIRS: frozenset[tuple[str, str]] = frozenset(
+    {("API", "KEY"), ("ACCESS", "KEY"), ("PRIVATE", "KEY"), ("AUTH", "TOKEN")}
+)
+
+MCP_ENV_SECRET_VALUE_RE: re.Pattern[str] = re.compile(
+    r"(?:"
+    r"(?:AKIA|ASIA)[A-Z0-9]{16}"
+    r"|gh[pousr]_[A-Za-z0-9]{20,}"
+    r"|(?:Bearer|Basic)\s+[A-Za-z0-9+/=_.\-]{8,}"
+    r"|github_pat_[A-Za-z0-9_]{20,}"
+    r"|glpat-[A-Za-z0-9_-]{20,}"
+    r"|xox[bpas]-[0-9a-zA-Z-]+"
+    r"|-----BEGIN\s+(?:RSA|DSA|EC|OPENSSH)?\s*PRIVATE\s+KEY"
+    r"|eyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{20,}"
+    r"|://[^/\s:@]+:[^/\s@]+@"
+    r")"
+)
+
+ENV_VAR_REFERENCE_RE: re.Pattern[str] = re.compile(
+    r"^\$\{[A-Za-z_][A-Za-z0-9_]*\}$|^\$[A-Za-z_][A-Za-z0-9_]*$"
+)
+
+MCP_ENV_METADATA_SUFFIXES: frozenset[str] = frozenset(
+    {"URL", "URI", "ENDPOINT", "PATH", "FILE", "HOST", "NAME", "ID", "MODE", "TYPE", "HEADER"}
+)
+
+
+def env_key_is_credential_like(key: str) -> bool:
+    """Token-split match: GITHUB_TOKEN yes, OAUTH_CLIENT_ID no."""
+    normalized = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key).upper().replace("-", "_")
+    tokens = [t for t in normalized.split("_") if t]
+    if tokens and tokens[-1] in MCP_ENV_METADATA_SUFFIXES:
+        return False
+    if any(t in MCP_ENV_SECRET_KEY_TOKENS for t in tokens):
+        return True
+    return any(
+        (tokens[i], tokens[i + 1]) in MCP_ENV_SECRET_TOKEN_PAIRS for i in range(len(tokens) - 1)
+    )

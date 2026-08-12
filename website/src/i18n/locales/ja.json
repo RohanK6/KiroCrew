@@ -6318,6 +6318,34 @@
       "verdict_tap_noop": "短く押しました。「{{mode}}」モードでは何も起こりません。もう少し長く押してください。",
       "verdict_toggle": "認識しました。実際のチャットではこの操作で録音が始まり、次に押すと停止します。",
       "verdict_wrong_key": "押されたのは {{got}} で、上で選んだ {{want}} ではありません。お使いのキーボードにそのキーがない場合は、「{{field}}」で別のキーを選んでください。"
+    },
+    "agentTemplateCreator": {
+      "name": "Name",
+      "name_required": "Name is required",
+      "name_must_be_lowercase": "Name must be lowercase with dashes/underscores only",
+      "name_already_exists": "A template with this name already exists",
+      "description": "Description",
+      "description_placeholder": "What this agent template does…",
+      "model": "Model",
+      "skills": "Skills",
+      "no_skills_available": "No skills available",
+      "tools": "Tools",
+      "tool_name_placeholder": "Tool name…",
+      "toggle_auto_approve": "Toggle auto-approve",
+      "shield_helper": "Click the shield icon to auto-approve a tool (skips confirmation)",
+      "mcp_servers": "MCP Servers",
+      "server_name_placeholder": "Server name…",
+      "args_placeholder": "args…",
+      "more": "more",
+      "system_prompt": "System Prompt",
+      "prompt_placeholder": "Custom system prompt for this agent…",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "save_changes": "Save Changes",
+      "create": "Create",
+      "create_agent_template": "Create Agent Template",
+      "edit_agent_template": "Edit Agent Template",
+      "clone_agent_template": "Clone Agent Template"
     }
   },
   "hooks": {
@@ -6530,7 +6558,12 @@
       "what_a_crew_starts_from_its_model_skills_tools_mc": "クルーの出発点 — モデル、スキル、ツール、MCP サーバー、ガードレール",
       "when_nothing_names_a_template_use": "テンプレートが指定されていない場合に使用",
       "where_it_comes_from": "提供元",
-      "yes_delete_it": "はい、削除します"
+      "yes_delete_it": "はい、削除します",
+      "create_template": "Create template",
+      "edit_template": "Edit template",
+      "clone_template": "Clone template",
+      "edit": "Edit",
+      "clone": "Clone"
     },
     "aidlc": {
       "dagView": {

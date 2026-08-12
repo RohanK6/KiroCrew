@@ -6405,6 +6405,34 @@
       "verdict_tap_noop": "এটি ছিল দ্রুত চাপ — “{{mode}}” মোডে কিছুই হত না। কী-টি আরও বেশি সময় চেপে ধরুন।",
       "verdict_toggle": "শনাক্ত হয়েছে — সত্যিকারের কথাবার্তায় এই চাপ রেকর্ডিং শুরু করত এবং পরের চাপ থামাত।",
       "verdict_wrong_key": "ওটি ছিল {{got}}, উপরে বেছে নেওয়া {{want}} নয়। এই কীবোর্ডে সেটি না থাকলে “{{field}}”-এ অন্য একটি বেছে নিন।"
+    },
+    "agentTemplateCreator": {
+      "name": "Name",
+      "name_required": "Name is required",
+      "name_must_be_lowercase": "Name must be lowercase with dashes/underscores only",
+      "name_already_exists": "A template with this name already exists",
+      "description": "Description",
+      "description_placeholder": "What this agent template does…",
+      "model": "Model",
+      "skills": "Skills",
+      "no_skills_available": "No skills available",
+      "tools": "Tools",
+      "tool_name_placeholder": "Tool name…",
+      "toggle_auto_approve": "Toggle auto-approve",
+      "shield_helper": "Click the shield icon to auto-approve a tool (skips confirmation)",
+      "mcp_servers": "MCP Servers",
+      "server_name_placeholder": "Server name…",
+      "args_placeholder": "args…",
+      "more": "more",
+      "system_prompt": "System Prompt",
+      "prompt_placeholder": "Custom system prompt for this agent…",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "save_changes": "Save Changes",
+      "create": "Create",
+      "create_agent_template": "Create Agent Template",
+      "edit_agent_template": "Edit Agent Template",
+      "clone_agent_template": "Clone Agent Template"
     }
   },
   "hooks": {
@@ -6618,7 +6646,12 @@
       "what_a_crew_starts_from_its_model_skills_tools_mc": "একটি Crew যা থেকে শুরু করে — তার মডেল, স্কিল, টুল, MCP সার্ভার আর সুরক্ষা নিয়ম",
       "when_nothing_names_a_template_use": "যখন কোনো টেমপ্লেট বলা হয়নি, তখন ব্যবহার করা হবে",
       "where_it_comes_from": "এটি কোথা থেকে এসেছে",
-      "yes_delete_it": "হ্যাঁ, মুছে ফেলুন"
+      "yes_delete_it": "হ্যাঁ, মুছে ফেলুন",
+      "create_template": "Create template",
+      "edit_template": "Edit template",
+      "clone_template": "Clone template",
+      "edit": "Edit",
+      "clone": "Clone"
     },
     "aidlc": {
       "dagView": {

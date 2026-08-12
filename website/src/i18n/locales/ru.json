@@ -6579,6 +6579,34 @@
       "verdict_tap_noop": "Это было короткое нажатие — в режиме «{{mode}}» ничего бы не произошло. Держите клавишу дольше.",
       "verdict_toggle": "Распознано — в реальном чате это нажатие начало бы запись, а следующее остановило бы её.",
       "verdict_wrong_key": "Это была {{got}}, а не выбранная выше {{want}}. Если на этой клавиатуре её нет, выберите другую в «{{field}}»."
+    },
+    "agentTemplateCreator": {
+      "name": "Name",
+      "name_required": "Name is required",
+      "name_must_be_lowercase": "Name must be lowercase with dashes/underscores only",
+      "name_already_exists": "A template with this name already exists",
+      "description": "Description",
+      "description_placeholder": "What this agent template does…",
+      "model": "Model",
+      "skills": "Skills",
+      "no_skills_available": "No skills available",
+      "tools": "Tools",
+      "tool_name_placeholder": "Tool name…",
+      "toggle_auto_approve": "Toggle auto-approve",
+      "shield_helper": "Click the shield icon to auto-approve a tool (skips confirmation)",
+      "mcp_servers": "MCP Servers",
+      "server_name_placeholder": "Server name…",
+      "args_placeholder": "args…",
+      "more": "more",
+      "system_prompt": "System Prompt",
+      "prompt_placeholder": "Custom system prompt for this agent…",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "save_changes": "Save Changes",
+      "create": "Create",
+      "create_agent_template": "Create Agent Template",
+      "edit_agent_template": "Edit Agent Template",
+      "clone_agent_template": "Clone Agent Template"
     }
   },
   "hooks": {
@@ -6794,7 +6822,12 @@
       "what_a_crew_starts_from_its_model_skills_tools_mc": "С чего начинает crew: модель, навыки, инструменты, MCP-серверы и правила безопасности",
       "when_nothing_names_a_template_use": "Когда шаблон не указан, использовать",
       "where_it_comes_from": "Откуда он взялся",
-      "yes_delete_it": "Да, удалить"
+      "yes_delete_it": "Да, удалить",
+      "create_template": "Create template",
+      "edit_template": "Edit template",
+      "clone_template": "Clone template",
+      "edit": "Edit",
+      "clone": "Clone"
     },
     "aidlc": {
       "dagView": {

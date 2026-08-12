@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { Star, Brain, Plug, Pin, Package, Lock, Hourglass, Bot, ChevronDown, LayoutTemplate, X } from 'lucide-react'
+import { Star, Brain, Plug, Pin, Package, Lock, Hourglass, Bot, ChevronDown, LayoutTemplate, X, Plus, Pencil, Copy } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { useAppSelector } from '../store'
 import { api } from '../api/client'
@@ -13,6 +13,7 @@ import SimpleSelect from '../components/SimpleSelect'
 import CrewAvatar from '../components/CrewAvatar'
 import type { KiroCrewAgent } from '../components/AgentSelector'
 import InfoTip from '../components/InfoTip'
+import AgentTemplateCreator from '../components/AgentTemplateCreator'
 import { useProvider } from '../providers'
 import { useFilteredDropdown } from '../hooks/useFilteredDropdown'
 import { useAvailableModels } from '../hooks/useAvailableModels'
@@ -333,6 +334,9 @@ export default function AgentsPage({ embedded }: { embedded?: boolean } = {}) {
   const [filter, setFilter] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [creatorOpen, setCreatorOpen] = useState(false)
+  const [editTarget, setEditTarget] = useState<AgentDetail | null>(null)
+  const [cloneMode, setCloneMode] = useState(false)
   const modelOptions = useAvailableModels()
   const { open: modelDropOpen, setOpen: setModelDropOpen, filter: modelFilter, setFilter: setModelFilter, dropdownRef: modelDropRef, inputRef: modelInputRef, filtered: filteredModels } = useFilteredDropdown(modelOptions)
   // Roving-focus keyboard nav for the model dropdown (shared with StyledSelect/AgentSelector).
@@ -584,14 +588,23 @@ export default function AgentsPage({ embedded }: { embedded?: boolean } = {}) {
              denied-command list instead of scrolling it inside a short box. */
           <div className="card-glow border border-border bg-card rounded-lg mb-4 animate-rise shadow-sm transition-all overflow-hidden flex h-[62vh] min-h-[420px] max-h-[760px]">
             <div className="w-[288px] shrink-0 border-r border-border flex flex-col bg-bg-accent">
-              <div className="p-2.5 border-b border-border">
+              <div className="p-2.5 border-b border-border flex items-center gap-1.5">
                 <SearchInput
-                  className="w-full"
+                  className="flex-1"
                   placeholder={i18nT('pages.agentsPage.filter_templates')}
                   aria-label={i18nT('pages.agentsPage.filter_templates')}
                   value={filter}
                   onChange={e => setFilter(e.target.value)}
                 />
+                <Btn
+                  type="button"
+                  className="shrink-0 px-2 py-1.5"
+                  onClick={() => { setEditTarget(null); setCloneMode(false); setCreatorOpen(true) }}
+                  aria-label={i18nT('pages.agentsPage.create_template')}
+                  title={i18nT('pages.agentsPage.create_template')}
+                >
+                  <Plus className="lucide-inline" />
+                </Btn>
               </div>
               <div className="flex-1 overflow-y-auto p-2">
                 {filtered.length === 0 ? (
@@ -646,6 +659,27 @@ export default function AgentsPage({ embedded }: { embedded?: boolean } = {}) {
                       </span>
                     )}
                     <div className="flex-1" />
+                    {/* Edit / Clone for user-owned templates */}
+                    {listed && listed.source !== 'package' && listed.source !== 'kirocrew' && (
+                      <>
+                        <Btn
+                          type="button"
+                          className="px-2 py-1 text-[12px]"
+                          onClick={() => { setEditTarget(selectedAgent); setCloneMode(false); setCreatorOpen(true) }}
+                          title={i18nT('pages.agentsPage.edit_template')}
+                        >
+                          <Pencil className="lucide-inline" /> {i18nT('pages.agentsPage.edit')}
+                        </Btn>
+                        <Btn
+                          type="button"
+                          className="px-2 py-1 text-[12px]"
+                          onClick={() => { setEditTarget(selectedAgent); setCloneMode(true); setCreatorOpen(true) }}
+                          title={i18nT('pages.agentsPage.clone_template')}
+                        >
+                          <Copy className="lucide-inline" /> {i18nT('pages.agentsPage.clone')}
+                        </Btn>
+                      </>
+                    )}
                     {/* A button that silently disappears teaches nothing, so the
                         two states the user can act on say what to do first. The
                         owner cases (built-in, package) stay silent: nothing the
@@ -871,6 +905,17 @@ export default function AgentsPage({ embedded }: { embedded?: boolean } = {}) {
         {usage && <ProviderUsageCard usage={usage} />}
         <SubagentsCard agents={agents} onClear={() => spawnClearMut.mutate()} onDelete={id => spawnDeleteMut.mutate(id)} />
       </div>
+
+      <AgentTemplateCreator
+        open={creatorOpen}
+        onClose={() => { setCreatorOpen(false); setEditTarget(null); setCloneMode(false) }}
+        onCreated={(name) => { refetchInstalled(); void select({ name } as InstalledAgent) }}
+        modelOptions={modelOptions}
+        existingNames={installed.map(a => a.name)}
+        mcpServerNames={Object.keys(mcpTools)}
+        editTarget={editTarget}
+        cloneMode={cloneMode}
+      />
     </>
   )
 }

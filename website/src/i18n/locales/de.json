@@ -6405,6 +6405,34 @@
       "verdict_tap_noop": "Das war ein kurzes Tippen — im Modus „{{mode}}“ würde nichts passieren. Halte die Taste länger.",
       "verdict_toggle": "Erkannt — in einem echten Chat würde dieser Druck die Aufnahme starten und der nächste sie beenden.",
       "verdict_wrong_key": "Das war {{got}}, nicht die oben gewählte Taste {{want}}. Hat diese Tastatur sie nicht, wähle unter „{{field}}“ eine andere."
+    },
+    "agentTemplateCreator": {
+      "name": "Name",
+      "name_required": "Name is required",
+      "name_must_be_lowercase": "Name must be lowercase with dashes/underscores only",
+      "name_already_exists": "A template with this name already exists",
+      "description": "Description",
+      "description_placeholder": "What this agent template does…",
+      "model": "Model",
+      "skills": "Skills",
+      "no_skills_available": "No skills available",
+      "tools": "Tools",
+      "tool_name_placeholder": "Tool name…",
+      "toggle_auto_approve": "Toggle auto-approve",
+      "shield_helper": "Click the shield icon to auto-approve a tool (skips confirmation)",
+      "mcp_servers": "MCP Servers",
+      "server_name_placeholder": "Server name…",
+      "args_placeholder": "args…",
+      "more": "more",
+      "system_prompt": "System Prompt",
+      "prompt_placeholder": "Custom system prompt for this agent…",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "save_changes": "Save Changes",
+      "create": "Create",
+      "create_agent_template": "Create Agent Template",
+      "edit_agent_template": "Edit Agent Template",
+      "clone_agent_template": "Clone Agent Template"
     }
   },
   "hooks": {
@@ -6618,7 +6646,12 @@
       "what_a_crew_starts_from_its_model_skills_tools_mc": "Womit eine Crew startet — ihr Modell, ihre Skills, ihre Tools, ihre MCP-Server und ihre Schutzregeln",
       "when_nothing_names_a_template_use": "Wenn nichts eine Vorlage nennt, verwende",
       "where_it_comes_from": "Woher sie kommt",
-      "yes_delete_it": "Ja, löschen"
+      "yes_delete_it": "Ja, löschen",
+      "create_template": "Create template",
+      "edit_template": "Edit template",
+      "clone_template": "Clone template",
+      "edit": "Edit",
+      "clone": "Clone"
     },
     "aidlc": {
       "dagView": {

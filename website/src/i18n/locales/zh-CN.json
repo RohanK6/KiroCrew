@@ -6318,6 +6318,34 @@
       "verdict_tap_noop": "这是一次快速点按 —— 在“{{mode}}”模式下不会发生任何事。请按住久一点。",
       "verdict_toggle": "识别正确 —— 在真实对话里，这次按下会开始录音，下一次按下会停止。",
       "verdict_wrong_key": "刚才那个是 {{got}}，不是你在上面选的 {{want}}。如果这块键盘没有那颗键，就在“{{field}}”里换一个。"
+    },
+    "agentTemplateCreator": {
+      "name": "Name",
+      "name_required": "Name is required",
+      "name_must_be_lowercase": "Name must be lowercase with dashes/underscores only",
+      "name_already_exists": "A template with this name already exists",
+      "description": "Description",
+      "description_placeholder": "What this agent template does…",
+      "model": "Model",
+      "skills": "Skills",
+      "no_skills_available": "No skills available",
+      "tools": "Tools",
+      "tool_name_placeholder": "Tool name…",
+      "toggle_auto_approve": "Toggle auto-approve",
+      "shield_helper": "Click the shield icon to auto-approve a tool (skips confirmation)",
+      "mcp_servers": "MCP Servers",
+      "server_name_placeholder": "Server name…",
+      "args_placeholder": "args…",
+      "more": "more",
+      "system_prompt": "System Prompt",
+      "prompt_placeholder": "Custom system prompt for this agent…",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "save_changes": "Save Changes",
+      "create": "Create",
+      "create_agent_template": "Create Agent Template",
+      "edit_agent_template": "Edit Agent Template",
+      "clone_agent_template": "Clone Agent Template"
     }
   },
   "hooks": {
@@ -6530,7 +6558,12 @@
       "what_a_crew_starts_from_its_model_skills_tools_mc": "Crew 启动时用的东西 —— 模型、技能、工具、MCP 服务器和防护规则",
       "when_nothing_names_a_template_use": "当没有指定模板时，使用",
       "where_it_comes_from": "它来自哪里",
-      "yes_delete_it": "是的，删除它"
+      "yes_delete_it": "是的，删除它",
+      "create_template": "Create template",
+      "edit_template": "Edit template",
+      "clone_template": "Clone template",
+      "edit": "Edit",
+      "clone": "Clone"
     },
     "aidlc": {
       "dagView": {

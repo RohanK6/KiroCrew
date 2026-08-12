@@ -64,6 +64,10 @@ from kiro_crew.sandbox import (
     create_subprocess_limited,
     wrap_argv,
 )
+from kiro_crew.security import ENV_VAR_REFERENCE_RE as _ENV_VAR_REFERENCE_RE
+from kiro_crew.security import MCP_ENV_SECRET_VALUE_RE as _MCP_ENV_SECRET_VALUE_RE
+from kiro_crew.security import env_key_is_credential_like as _env_key_is_credential_like
+from kiro_crew.security import is_sensitive_path
 
 _MODEL_LIST_STDERR_TAIL_CHARS = 1000
 
@@ -164,7 +168,7 @@ async def api_agent_config(request: web.Request) -> web.Response:
         try:
             body = await request.json()
         except Exception:
-            return web.json_response({"error": "invalid JSON"}, status=400)
+            return web.json_response({"error": "invalid JSON", "code": "invalid_json"}, status=400)
         config = body.get("config")
         if not isinstance(config, dict):
             return web.json_response({"error": "config must be an object"}, status=400)
@@ -230,7 +234,7 @@ async def api_default_agent(request: web.Request) -> web.Response:
         try:
             body = await request.json()
         except Exception:
-            return web.json_response({"error": "invalid JSON"}, status=400)
+            return web.json_response({"error": "invalid JSON", "code": "invalid_json"}, status=400)
         name = body.get("agent", "")
         # Reject non-strings before any use: a JSON list/object here would make
         # the membership check below raise (unhashable) into a 500, and a
@@ -383,7 +387,7 @@ async def api_capability_mcp_install(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "invalid JSON"}, status=400)
+        return web.json_response({"error": "invalid JSON", "code": "invalid_json"}, status=400)
     server_id = body.get("server_id", "").strip()
     if not server_id:
         return web.json_response({"error": "server_id required"}, status=400)
@@ -416,7 +420,7 @@ async def api_capability_mcp_uninstall(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "invalid JSON"}, status=400)
+        return web.json_response({"error": "invalid JSON", "code": "invalid_json"}, status=400)
     server_id = body.get("server_id", "").strip()
     if not server_id:
         return web.json_response({"error": "server_id required"}, status=400)
@@ -465,7 +469,7 @@ async def api_capability_skills_install(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "invalid JSON"}, status=400)
+        return web.json_response({"error": "invalid JSON", "code": "invalid_json"}, status=400)
     package = body.get("package", "").strip()
     if not package:
         return web.json_response({"error": "package required"}, status=400)
@@ -494,7 +498,7 @@ async def api_capability_skills_uninstall(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "invalid JSON"}, status=400)
+        return web.json_response({"error": "invalid JSON", "code": "invalid_json"}, status=400)
     package = body.get("package", "").strip()
     if not package:
         return web.json_response({"error": "package required"}, status=400)
@@ -532,7 +536,7 @@ async def _mutate_agent_package(request: web.Request, *, install: bool) -> web.R
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "invalid JSON"}, status=400)
+        return web.json_response({"error": "invalid JSON", "code": "invalid_json"}, status=400)
     # A body that is valid JSON but not an object (or carries a non-string
     # ``package``) must be a 400, not an unhandled AttributeError -> 500.
     if not isinstance(body, dict):
@@ -1176,7 +1180,7 @@ async def api_agent_detail(request: web.Request) -> web.Response:
         try:
             patch_body = await request.json()
         except (json.JSONDecodeError, ValueError):
-            return web.json_response({"error": "invalid JSON"}, status=400)
+            return web.json_response({"error": "invalid JSON", "code": "invalid_json"}, status=400)
         # Valid JSON is not necessarily an object. A top-level array makes
         # ``"skills" in patch_body`` a LIST-membership test (true for
         # ``["skills"]``), and the subscript that follows then raises TypeError
@@ -1661,7 +1665,7 @@ async def api_kirocrew_agents_create(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "invalid JSON"}, status=400)
+        return web.json_response({"error": "invalid JSON", "code": "invalid_json"}, status=400)
     name = body.get("name", "").strip()
     if not name:
         return web.json_response({"error": "Agent name is required"}, status=400)
@@ -1700,7 +1704,7 @@ async def api_kirocrew_agent_update(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "invalid JSON"}, status=400)
+        return web.json_response({"error": "invalid JSON", "code": "invalid_json"}, status=400)
     async with _get_config_lock():
         cfg = KiroCrewConfig.load()
         if name not in cfg.agents:
@@ -1782,3 +1786,469 @@ def _regen_conductor() -> None:
         generate_conductor_skill(SkillsLoader())
     except Exception:
         logger.exception("Failed to regenerate conductor skill")
+
+
+# ── Agent Template Authoring (CREATE / UPDATE) ──────────────────────
+
+_TEMPLATE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+_TEMPLATE_MAX_PROMPT_CHARS = 100_000
+_TEMPLATE_MAX_DESCRIPTION_CHARS = 2000
+_TEMPLATE_MAX_MCP_SERVERS = 50
+_TEMPLATE_MAX_TOOLS = 500
+_TEMPLATE_MAX_RESOURCES = 200
+
+#: Spec keys the authoring form owns. A PUT replaces exactly these; anything else
+#: in the existing spec is carried forward untouched (see the update handler).
+_EDITOR_OWNED_SPEC_KEYS = frozenset(
+    {
+        "name",
+        "description",
+        "model",
+        "prompt",
+        "tools",
+        "allowedTools",
+        "mcpServers",
+        "resources",
+    }
+)
+
+
+def _managed_agent_filenames() -> tuple[str, ...]:
+    """The spec filenames Kiro Crew itself writes and rewrites.
+
+    Read through ``agent_files`` rather than duplicated as literals so adding a
+    managed spec there protects it here automatically.
+    """
+    from kiro_crew.agent_files import OWNED_KIRO_AGENT_FILES
+
+    return OWNED_KIRO_AGENT_FILES
+
+
+def _reserved_template_names() -> set[str]:
+    """Names a template may not take.
+
+    The managed specs' own stems, plus ``default`` — the built-in agent that has
+    no config file and is special-cased by :func:`api_agent_detail`.
+    """
+    return {Path(f).stem for f in _managed_agent_filenames()} | {"default"}
+
+
+def _template_is_writable(filename: str) -> str | None:
+    """Return a refusal reason for a spec this endpoint must not overwrite.
+
+    Two classes are refused:
+
+    * ``<app>--<agent>.json`` — owned by an installed app.
+    * ``OWNED_KIRO_AGENT_FILES`` — Kiro Crew rebuilds these from shipped defaults
+      on every install and at boot self-heal. A full-replace write here drops
+      ``hooks`` (including the bash audit hook), ``includeMcpJson`` and the
+      managed MCP server block, breaking the running install until the next
+      rebuild. A ``--``-only check misses every one of them, since none contains
+      a double dash.
+    """
+    if "--" in filename:
+        return "Cannot edit app-managed agent templates"
+    if filename in _managed_agent_filenames():
+        return (
+            f"'{Path(filename).stem}' is managed by Kiro Crew and is rebuilt on "
+            "every install; edits here would be silently reverted. Clone it to "
+            "get an editable copy"
+        )
+    return None
+
+
+def _name_already_claimed(agents_dir: Path, name: str) -> bool:
+    """True when any existing spec already answers to *name*.
+
+    kiro-cli resolves an agent by the ``name`` FIELD, not the filename, so a
+    package spec at ``<pkg>-reviewer.json`` declaring ``"name": "reviewer"``
+    makes a new ``reviewer.json`` a coin flip over which one wins. A filename
+    check alone does not catch it.
+    """
+    try:
+        candidates = sorted(agents_dir.glob("*.json"))
+    except OSError:
+        return False
+    for path in candidates:
+        if path.stem == name:
+            return True
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and spec_str(data, "name") == name:
+            return True
+    return False
+
+
+def _write_spec_exclusive(target: Path, content: str) -> str | None:
+    """Create *target* only if absent. Returns an error code or None.
+
+    ``O_EXCL``, not ``exists()`` then ``os.replace``: the check and the write are
+    two steps and ``os.replace`` overwrites, so a concurrent POST — or any other
+    tool writing that path — silently clobbers the loser. Only the kernel can
+    make "create only if absent" atomic.
+    """
+    try:
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return "agent_template_exists"
+    except OSError as exc:
+        logger.warning("Failed to create agent template %s: %s", target, exc)
+        return "agent_template_write_failed"
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+    except OSError as exc:
+        logger.warning("Failed to write agent template %s: %s", target, exc)
+        target.unlink(missing_ok=True)
+        return "agent_template_write_failed"
+    return None
+
+
+def _validate_mcp_env(env: dict[str, str], server_name: str) -> str | None:
+    """Screen an mcpServers[].env block for literal secrets.
+
+    Returns an error message string on violation, or None if clean.
+    """
+    for key, value in env.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            return f"mcpServers.{server_name}.env: keys and values must be strings"
+        # Allow env-var references ($VAR or ${VAR})
+        if _ENV_VAR_REFERENCE_RE.match(value):
+            continue
+        # Check key name for credential-like patterns
+        if _env_key_is_credential_like(key):
+            return (
+                f"mcpServers.{server_name}.env.{key}: looks like a credential. "
+                f"Use an environment variable reference (${{VAR}}) instead of a literal value"
+            )
+        # Check value for known secret patterns
+        if _MCP_ENV_SECRET_VALUE_RE.search(value):
+            return (
+                f"mcpServers.{server_name}.env.{key}: value matches a known secret pattern. "
+                f"Use an environment variable reference (${{VAR}}) instead"
+            )
+    return None
+
+
+def _build_template_spec(body: dict) -> tuple[dict, str | None]:
+    """Validate and build a kiro-cli agent spec dict from a request body.
+
+    Returns (spec, None) on success or ({}, error_message) on validation failure.
+    """
+    name = body.get("name", "")
+    if not isinstance(name, str) or not _TEMPLATE_NAME_RE.match(name):
+        return {}, (
+            "name must match ^[a-z0-9][a-z0-9._-]{0,63}$ "
+            "(lowercase, start with alphanumeric, max 64 chars)"
+        )
+
+    spec: dict = {"name": name}
+
+    # Description (optional)
+    description = body.get("description", "")
+    if description:
+        if not isinstance(description, str):
+            return {}, "description must be a string"
+        if len(description) > _TEMPLATE_MAX_DESCRIPTION_CHARS:
+            return {}, f"description exceeds {_TEMPLATE_MAX_DESCRIPTION_CHARS} characters"
+        spec["description"] = description
+
+    # Model (optional)
+    model = body.get("model", "")
+    if model:
+        if not isinstance(model, str):
+            return {}, "model must be a string"
+        spec["model"] = model
+
+    # Prompt (optional). The kiro spec field is ``prompt``; ``customInstructions``
+    # is accepted as a request-body alias only, never written. kiro-cli validates
+    # these files with serde ``deny_unknown_fields`` and rejects the ENTIRE spec on
+    # any unknown key, then silently falls back to the default agent — so writing
+    # ``customInstructions`` would make every template carrying a prompt
+    # unloadable while the session appeared to run the user's agent.
+    prompt = body.get("prompt", "") or body.get("customInstructions", "")
+    if prompt:
+        if not isinstance(prompt, str):
+            return {}, "prompt must be a string"
+        if len(prompt) > _TEMPLATE_MAX_PROMPT_CHARS:
+            return {}, f"prompt exceeds {_TEMPLATE_MAX_PROMPT_CHARS} characters"
+        spec["prompt"] = prompt
+
+    # tools (list of tool URIs)
+    tools = body.get("tools")
+    if tools is not None:
+        if not isinstance(tools, list):
+            return {}, "tools must be a list"
+        if len(tools) > _TEMPLATE_MAX_TOOLS:
+            return {}, f"tools exceeds {_TEMPLATE_MAX_TOOLS} entries"
+        if not all(isinstance(t, str) for t in tools):
+            return {}, "tools entries must be strings"
+        spec["tools"] = tools
+
+    # allowedTools (list of tool name patterns)
+    allowed_tools = body.get("allowedTools")
+    if allowed_tools is not None:
+        if not isinstance(allowed_tools, list):
+            return {}, "allowedTools must be a list"
+        if len(allowed_tools) > _TEMPLATE_MAX_TOOLS:
+            return {}, f"allowedTools exceeds {_TEMPLATE_MAX_TOOLS} entries"
+        if not all(isinstance(t, str) for t in allowed_tools):
+            return {}, "allowedTools entries must be strings"
+        spec["allowedTools"] = allowed_tools
+
+    # mcpServers
+    mcp_servers = body.get("mcpServers")
+    if mcp_servers is not None:
+        if not isinstance(mcp_servers, dict):
+            return {}, "mcpServers must be an object"
+        if len(mcp_servers) > _TEMPLATE_MAX_MCP_SERVERS:
+            return {}, f"mcpServers exceeds {_TEMPLATE_MAX_MCP_SERVERS} entries"
+        for srv_name, srv_spec in mcp_servers.items():
+            if not isinstance(srv_name, str):
+                return {}, "mcpServers keys must be strings"
+            if not isinstance(srv_spec, dict):
+                return {}, f"mcpServers.{srv_name} must be an object"
+            # Validate command path is not sensitive
+            cmd = srv_spec.get("command", "")
+            if cmd and isinstance(cmd, str) and is_sensitive_path(cmd):
+                return {}, f"mcpServers.{srv_name}.command: path is sensitive"
+            # Screen env block for literal secrets
+            env = srv_spec.get("env")
+            if env:
+                if not isinstance(env, dict):
+                    return {}, f"mcpServers.{srv_name}.env must be an object"
+                err = _validate_mcp_env(env, srv_name)
+                if err:
+                    return {}, err
+        spec["mcpServers"] = mcp_servers
+
+    # resources (list of resource URIs)
+    resources = body.get("resources")
+    if resources is not None:
+        if not isinstance(resources, list):
+            return {}, "resources must be a list"
+        if len(resources) > _TEMPLATE_MAX_RESOURCES:
+            return {}, f"resources exceeds {_TEMPLATE_MAX_RESOURCES} entries"
+        if not all(isinstance(r, str) for r in resources):
+            return {}, "resources entries must be strings"
+        spec["resources"] = resources
+
+    # deniedCommands is deliberately NOT accepted.
+    #
+    # Two independent reasons, either of which is disqualifying:
+    #
+    # 1. At the top level it is an unknown key, so kiro-cli's
+    #    ``deny_unknown_fields`` rejects the whole spec and falls back to the
+    #    default agent — the template would silently not exist.
+    # 2. Relocating it to ``toolsSettings.execute_bash.deniedCommands`` (the only
+    #    place kiro-cli reads it) would resurrect a RETIRED mechanism. Command
+    #    denial moved to Kiro Crew's own hooks.py PreToolUse gate, and
+    #    ``agent.py:_strip_legacy_denied_commands`` actively removes that key on
+    #    every refresh precisely so a stale spec rule cannot outrank the gate.
+    #    Offering it in an editor would let a user author a rule that either
+    #    disappears or shadows Settings > Security.
+    #
+    # A body carrying it is rejected loudly rather than ignored: silently
+    # dropping a field a user believes restricts the agent is the worse failure.
+    if body.get("deniedCommands") is not None:
+        return {}, (
+            "deniedCommands is not settable on an agent template. Command denial "
+            "is enforced by Kiro Crew's tool gate; configure it in Settings > Security"
+        )
+
+    return spec, None
+
+
+async def api_agents_installed_create(request: web.Request) -> web.Response:
+    """POST /api/agents/installed — create a new agent template (kiro-cli spec).
+
+    Writes ``~/.kiro/agents/<name>.json`` atomically. Rejects names that
+    collide with existing files.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid JSON", "code": "invalid_json"}, status=400)
+
+    spec, err = _build_template_spec(body)
+    if err:
+        return web.json_response({"error": err, "code": "validation_failed"}, status=400)
+
+    name = spec["name"]
+
+    if name in _reserved_template_names():
+        return web.json_response(
+            {"error": f"'{name}' is reserved", "code": "agent_name_reserved"}, status=400
+        )
+
+    # Map skill keys to skill:// URIs if provided
+    skill_keys = body.get("skills")
+    if skill_keys is not None:
+        if not isinstance(skill_keys, list) or not all(isinstance(k, str) for k in skill_keys):
+            return web.json_response({"error": "skills must be a list of strings", "code": "invalid_skills"}, status=400)
+        if len(skill_keys) > MAX_AGENT_SKILLS:
+            return web.json_response(
+                {"error": f"skills exceeds {MAX_AGENT_SKILLS} entries"}, status=400
+            )
+        state: DashboardState = request.app["state"]
+        from kiro_crew.agent import kiro_agents_dir_path
+
+        agent_path = kiro_agents_dir_path() / f"{name}.json"
+        applied, unknown = apply_skill_mapping(spec, agent_path, state, skill_keys)
+        if unknown:
+            return web.json_response(
+                {"error": f"unknown skill keys: {', '.join(unknown)}"}, status=400
+            )
+
+    from kiro_crew.agent import kiro_agents_dir_path  # noqa: F811
+
+    agents_dir = kiro_agents_dir_path()
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    target = agents_dir / f"{name}.json"
+
+    if _name_already_claimed(agents_dir, name):
+        return web.json_response(
+            {
+                "error": f"Agent template '{name}' already exists",
+                "code": "agent_template_exists",
+            },
+            status=409,
+        )
+
+    write_err = _write_spec_exclusive(target, json.dumps(spec, indent=2) + "\n")
+    if write_err == "agent_template_exists":
+        # Lost the race against a concurrent create between the scan and the write.
+        return web.json_response(
+            {
+                "error": f"Agent template '{name}' already exists",
+                "code": "agent_template_exists",
+            },
+            status=409,
+        )
+    if write_err:
+        return web.json_response(
+            {"error": "could not write agent template", "code": write_err}, status=500
+        )
+
+    clear_list_agents_cache()
+    state_obj: DashboardState = request.app["state"]
+    state_obj.push_refresh("agents")
+
+    _sel().log_api_access(
+        caller=request.get("user", "dashboard"),
+        operation="agent_template.create",
+        outcome="success",
+        source="dashboard",
+        resources=name,
+    )
+    return web.json_response({"ok": True, "name": name}, status=201)
+
+
+async def api_agents_installed_update(request: web.Request) -> web.Response:
+    """PUT /api/agents/installed/{name} — update an existing agent template.
+
+    Overwrites ``~/.kiro/agents/<name>.json`` atomically. Only user-owned
+    templates (not app-namespaced ``<app>--<agent>.json`` files) are writable.
+    """
+    url_name = request.match_info["name"]
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid JSON", "code": "invalid_json"}, status=400)
+
+    # Body name must match URL name
+    body_name = body.get("name", "")
+    if body_name and body_name != url_name:
+        return web.json_response(
+            {"error": "body.name must match the URL name"}, status=400
+        )
+    # Inject URL name if body omits it
+    body["name"] = url_name
+
+    spec, err = _build_template_spec(body)
+    if err:
+        return web.json_response({"error": err, "code": "validation_failed"}, status=400)
+
+    from kiro_crew.agent import kiro_agents_dir_path  # noqa: F811
+
+    agents_dir = kiro_agents_dir_path()
+    target = agents_dir / f"{url_name}.json"
+
+    if not target.is_file():
+        return web.json_response(
+            {"error": f"Agent template '{url_name}' not found", "code": "not_found"},
+            status=404,
+        )
+
+    refusal = _template_is_writable(target.name)
+    if refusal:
+        return web.json_response({"error": refusal, "code": "agent_template_managed"}, status=403)
+
+    # Carry forward spec keys this form does not model. The build above returns a
+    # FRESH dict, so a plain full-replace silently deletes any hand-authored
+    # ``hooks``, ``includeMcpJson`` or ``toolsSettings`` the user had — an edit to
+    # the description would drop their audit hook. Only keys the editor actually
+    # owns are replaced; everything else is preserved.
+    try:
+        existing = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        existing = {}
+    if isinstance(existing, dict):
+        for key, value in existing.items():
+            if key not in _EDITOR_OWNED_SPEC_KEYS and key not in spec:
+                spec[key] = value
+
+    # Map skill keys to skill:// URIs if provided
+    skill_keys = body.get("skills")
+    if skill_keys is not None:
+        if not isinstance(skill_keys, list) or not all(isinstance(k, str) for k in skill_keys):
+            return web.json_response({"error": "skills must be a list of strings", "code": "invalid_skills"}, status=400)
+        if len(skill_keys) > MAX_AGENT_SKILLS:
+            return web.json_response(
+                {"error": f"skills exceeds {MAX_AGENT_SKILLS} entries"}, status=400
+            )
+        state: DashboardState = request.app["state"]
+        applied, unknown = apply_skill_mapping(spec, target, state, skill_keys)
+        if unknown:
+            return web.json_response(
+                {"error": f"unknown skill keys: {', '.join(unknown)}"}, status=400
+            )
+
+    # Atomic overwrite
+    import tempfile
+
+    try:
+        content = json.dumps(spec, indent=2) + "\n"
+        fd, tmp_path = tempfile.mkstemp(dir=str(agents_dir), suffix=".json.tmp")
+        closed = False
+        try:
+            os.write(fd, content.encode("utf-8"))
+            os.close(fd)
+            closed = True
+            os.replace(tmp_path, str(target))
+        except BaseException:
+            if not closed:
+                os.close(fd)
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+    except OSError as exc:
+        return _err500(exc)
+
+    clear_list_agents_cache()
+    state_obj: DashboardState = request.app["state"]
+    state_obj.push_refresh("agents")
+
+    _sel().log_api_access(
+        caller=request.get("user", "dashboard"),
+        operation="agent_template.update",
+        outcome="success",
+        source="dashboard",
+        resources=url_name,
+    )
+    return web.json_response({"ok": True, "name": url_name})

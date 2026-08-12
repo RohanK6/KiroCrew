@@ -6318,6 +6318,34 @@
       "verdict_tap_noop": "짧게 누르셨습니다. ‘{{mode}}’ 모드에서는 아무 일도 일어나지 않습니다. 키를 더 길게 누르세요.",
       "verdict_toggle": "인식되었습니다. 실제 대화에서는 이 입력으로 녹음이 시작되고, 다음에 누르면 중지됩니다.",
       "verdict_wrong_key": "{{got}} 이(가) 입력되었습니다. 위에서 선택한 {{want}} 이(가) 아닙니다. 사용 중인 키보드에 해당 키가 없다면 ‘{{field}}’에서 다른 키를 선택하세요."
+    },
+    "agentTemplateCreator": {
+      "name": "Name",
+      "name_required": "Name is required",
+      "name_must_be_lowercase": "Name must be lowercase with dashes/underscores only",
+      "name_already_exists": "A template with this name already exists",
+      "description": "Description",
+      "description_placeholder": "What this agent template does…",
+      "model": "Model",
+      "skills": "Skills",
+      "no_skills_available": "No skills available",
+      "tools": "Tools",
+      "tool_name_placeholder": "Tool name…",
+      "toggle_auto_approve": "Toggle auto-approve",
+      "shield_helper": "Click the shield icon to auto-approve a tool (skips confirmation)",
+      "mcp_servers": "MCP Servers",
+      "server_name_placeholder": "Server name…",
+      "args_placeholder": "args…",
+      "more": "more",
+      "system_prompt": "System Prompt",
+      "prompt_placeholder": "Custom system prompt for this agent…",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "save_changes": "Save Changes",
+      "create": "Create",
+      "create_agent_template": "Create Agent Template",
+      "edit_agent_template": "Edit Agent Template",
+      "clone_agent_template": "Clone Agent Template"
     }
   },
   "hooks": {
@@ -6530,7 +6558,12 @@
       "what_a_crew_starts_from_its_model_skills_tools_mc": "크루의 출발점 — 모델, 스킬, 도구, MCP 서버, 가드레일",
       "when_nothing_names_a_template_use": "템플릿이 지정되지 않은 경우 사용",
       "where_it_comes_from": "출처",
-      "yes_delete_it": "예, 삭제합니다"
+      "yes_delete_it": "예, 삭제합니다",
+      "create_template": "Create template",
+      "edit_template": "Edit template",
+      "clone_template": "Clone template",
+      "edit": "Edit",
+      "clone": "Clone"
     },
     "aidlc": {
       "dagView": {
