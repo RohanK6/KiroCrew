@@ -1447,8 +1447,11 @@
       "reaction_minus1": "Thumbs down",
       "reaction_plus1": "Thumbs up",
       "reaction_rocket": "Rocket",
-      "jira_open_in_browser": "Jira issue — open in browser to view details.",
-      "open_in_jira": "Open in Jira"
+      "jira_no_credentials": "No credentials configured for this Jira host. Add a jira_auth entry to your config.json to view issue details inline.",
+      "open_in_jira": "Open in Jira",
+      "provider_github": "GitHub",
+      "provider_gitlab": "GitLab",
+      "provider_jira": "Jira"
     },
     "jobForm": {
       "add": "Add",
