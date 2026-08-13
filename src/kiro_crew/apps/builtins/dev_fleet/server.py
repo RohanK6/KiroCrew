@@ -3358,12 +3358,13 @@ async def _prune_candidates() -> dict:
     return {"ok": True, "candidates": candidates, "kept": kept, "scanned": len(worktrees) - 1}
 
 
-async def _prune_run(names: list[str]) -> dict:
+async def _prune_run(names: list[str], force_names: set[str] | None = None) -> dict:
     # Deduplicate while preserving order: the API accepts any list of names,
     # and a duplicate would spawn two workers racing to remove the SAME
     # worktree — the second one then reports a spurious failure over the
     # first one's success.
     names = list(dict.fromkeys(names))
+    _force = force_names or set()
     async with _PRUNE_LOCK:
         if _PRUNE_STATE["running"]:
             return {"ok": False, "error": "prune already running"}
@@ -3405,17 +3406,19 @@ async def _prune_run(names: list[str]) -> dict:
                     error = err
                     result = {"name": nm, "ok": False, "error": err}
                 else:
-                    verdict = await _prunable(target["path"], target.get("branch"))
-                    if not verdict.get("ok"):
-                        error = f"not prunable: {verdict.get('code', 'unknown')}"
-                        result = {"name": nm, "ok": False, "error": error}
-                    else:
+                    is_forced = nm in _force
+                    if not is_forced:
+                        verdict = await _prunable(target["path"], target.get("branch"))
+                        if not verdict.get("ok"):
+                            error = f"not prunable: {verdict.get('code', 'unknown')}"
+                            result = {"name": nm, "ok": False, "error": error}
+                    if not error:
                         def _progress(phase: str, _nm: str = nm) -> None:
                             # phase in {"stopping_pod", "removing"}
                             items[_nm]["status"] = phase
 
                         res = await _worktree_remove(
-                            nm, force=False, progress=_progress, _caller="prune"
+                            nm, force=is_forced, progress=_progress, _caller="prune"
                         )
                         result = {"name": nm, **res}
                         if res.get("ok"):
@@ -3769,11 +3772,42 @@ async def api_dev_fleet_prune_run(request: web.Request) -> web.Response:
         return web.json_response(
             {"ok": False, "error": "'names' must be a list of strings"}, status=400
         )
+    raw_force = body.get("force_names") or []
+    if not isinstance(raw_force, list) or not all(isinstance(n, str) for n in raw_force):
+        return web.json_response(
+            {"ok": False, "code": "invalid_force_names", "error": "'force_names' must be a list of strings"},
+            status=400,
+        )
     valid = await _valid_worktree_names()
-    names = [n for n in raw_names if n in valid]
-    if not names:
-        return web.json_response({"ok": False, "error": "no valid names"}, status=400)
-    return web.json_response(await _prune_run(names))
+    force_set: set[str] = set()
+    if raw_force:
+        # Guard: never force-remove the main checkout or the currently live worktree.
+        live_path = await _live_worktree_path()
+        live_name = Path(live_path).name if live_path else None
+        guarded: set[str] = set()
+        for nm in raw_force:
+            wt, _ = await _find_worktree(nm)
+            if wt and wt.get("is_main"):
+                guarded.add(nm)
+            elif live_name and nm == live_name:
+                guarded.add(nm)
+        if guarded:
+            return web.json_response(
+                {"ok": False, "code": "protected_worktree",
+                 "error": f"cannot force-remove protected worktrees: {', '.join(sorted(guarded))}"},
+                status=400,
+            )
+        force_set = {n for n in raw_force if n in valid}
+    # Merge both lists: regular + forced (forced items skip the prunable verdict).
+    all_names = [n for n in raw_names if n in valid]
+    for fn in raw_force:
+        if fn in valid and fn not in all_names:
+            all_names.append(fn)
+    if not all_names:
+        return web.json_response({"ok": False, "code": "no_valid_names", "error": "no valid names"}, status=400)
+    if force_set:
+        return web.json_response(await _prune_run(all_names, force_names=force_set))
+    return web.json_response(await _prune_run(all_names))
 
 
 async def _pod_name_action(request: web.Request, action) -> web.Response:
