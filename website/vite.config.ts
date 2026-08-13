@@ -488,8 +488,22 @@ export default defineConfig({
     // ceiling that fails a genuine leak loudly instead of dragging the host down.
     // (Vitest 4 pool rework: these are top-level, not poolOptions; minWorkers
     // was removed — only maxWorkers has effect.)
-    maxWorkers: 4,
-    execArgv: ['--max-old-space-size=4096'],
+    //
+    // 4 x 4096MB (16GB heap alone) was still too high for ubuntu-latest: two
+    // workers peaking simultaneously exhausts the runner's RAM before either
+    // hits its own --max-old-space-size ceiling, so the OOM kill lands as a
+    // SIGKILL with no JS-level error at all -- the killed worker's file simply
+    // never finishes, and vitest's fork-manager marks it failed via
+    // hasFailed(), a path dangerouslyIgnoreUnhandledErrors does not gate (that
+    // flag only covers errors a live worker gets to report). This reproduces
+    // as shard-composition-dependent: only a diff that shifts memory-heavy
+    // (iframe/component) tests into the same shard as several others reliably
+    // trips it, which is why it hit some PRs' shard 2/3 but not main's own
+    // runs with a different file spread. 2 x 3072MB = 6GB leaves real headroom
+    // for the orchestrator process, coverage instrumentation, and OS overhead
+    // alongside the two workers. See issue #3356.
+    maxWorkers: 2,
+    execArgv: ['--max-old-space-size=3072'],
     // Default 5s is too tight for tests that ``await import(...)`` inside the
     // body: under a full concurrent forks run the collect phase can starve the
     // dynamic import past 5s and it times out. 15s gives headroom for
