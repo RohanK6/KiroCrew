@@ -1513,7 +1513,20 @@
       "disconnect_from": "Disconnect from {{label}}",
       "held_elsewhere": "{{label}} is in use by another session.",
       "unavailable": "This destination is unavailable.",
-      "unknown_error": "unknown error"
+      "unknown_error": "unknown error",
+      "confirm_release": "Release this two-way binding? Both sides will stop syncing.",
+      "confirm_stop_mirroring": "Stop mirroring to {{label}}?",
+      "link_failed": "Link failed: {{reason}}",
+      "mirror": "Mirror",
+      "mirror_stopped": "Mirror to {{label}} stopped",
+      "post_reminder": "Post reminder in {{label}}",
+      "release": "Release",
+      "released": "Released binding with {{label}}",
+      "reminder_failed": "Reminder failed: {{reason}}",
+      "reminder_sent": "Reminder sent to {{label}}",
+      "stop_failed": "Stop failed: {{reason}}",
+      "stop_mirroring": "Stop mirroring to {{label}}",
+      "two_way": "Two-way"
     },
     "linkPreview": {
       "copied": "Copied",

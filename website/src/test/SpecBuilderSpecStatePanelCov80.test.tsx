@@ -98,7 +98,8 @@ describe('SpecStatePanel', () => {
       />,
     )
     fireEvent.click(screen.getByText('zz-opt-a'))
-    fireEvent.click(screen.getByText('zz-opt-b'))
+    // d1 collapses immediately (sent mark replaces options with "→ zz-opt-a"),
+    // so zz-opt-b is gone. Assert blocking on the REMAINING decision (d2).
     fireEvent.click(screen.getByText('zz-opt-c'))
     expect(sendMessage).toHaveBeenCalledTimes(1)
     // The unrelated decision is dimmed while another one is answering.
