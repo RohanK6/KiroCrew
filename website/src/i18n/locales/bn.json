@@ -7911,9 +7911,10 @@
       "toolDetails": {
         "auto": "স্বয়ংক্রিয়",
         "details_unavailable_for_historical_tool_calls": "পুরোনো টুল কলের বিস্তারিত পাওয়া যায় না।",
+        "formatted": "ফরম্যাট করা",
         "no_input_or_output_captured_for_this_tool_call": "এই টুল কলের কোনো ইনপুট বা আউটপুট রাখা হয়নি।",
-        "not_yet_available": "{{label}} এখনও পাওয়া যাচ্ছে না",
         "null": "null",
+        "raw": "মূল",
         "render_escaped_whitespace_as_real_line_breaks": "এস্কেপ করা হোয়াইটস্পেস সত্যিকারের লাইন ব্রেক হিসেবে দেখাও",
         "show_the_exact_payload_escaping_preserved": "হুবহু পেলোড দেখাও, এস্কেপিং অপরিবর্তিত",
         "waiting_for_approval": "অনুমোদনের অপেক্ষায়"
@@ -8721,7 +8722,10 @@
       "timeout": "টাইমআউট",
       "total": "মোট",
       "total_runs": "মোট রান",
-      "user": "ব্যবহারকারী"
+      "user": "ব্যবহারকারী",
+      "matcher_placeholder_regex": "Matcher (regex, e.g. \\b(auth|login)\\b)",
+      "matcher_placeholder_contains": "Matcher (contains, e.g. deploy|release)",
+      "skills_inert_warning": "These skills can't fire on this configuration: {{skills}}. To save, switch to UserPromptSubmit or AgentSpawn without a command — or remove the skills."
     },
     "kiroCrewAgentsPage": {
       "a_unique_identifier_for_this_workspace_agents_re": "এই ওয়ার্কস্পেসের জন্য একটি অনন্য শনাক্তকারী। এজেন্ট নাম দিয়ে ওয়ার্কস্পেস উল্লেখ করে।",

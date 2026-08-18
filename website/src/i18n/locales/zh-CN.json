@@ -7808,9 +7808,10 @@
       "toolDetails": {
         "auto": "自动",
         "details_unavailable_for_historical_tool_calls": "历史工具调用的详情不可用。",
+        "formatted": "格式化",
         "no_input_or_output_captured_for_this_tool_call": "此工具调用未捕获输入或输出。",
-        "not_yet_available": "{{label}} 暂不可用",
         "null": "null",
+        "raw": "原始",
         "render_escaped_whitespace_as_real_line_breaks": "将转义的空白字符渲染为真实换行",
         "show_the_exact_payload_escaping_preserved": "显示精确载荷，保留转义",
         "waiting_for_approval": "等待审批"
@@ -8610,7 +8611,10 @@
       "timeout": "超时",
       "total": "总计",
       "total_runs": "运行总次数",
-      "user": "用户"
+      "user": "用户",
+      "matcher_placeholder_regex": "Matcher (regex, e.g. \\b(auth|login)\\b)",
+      "matcher_placeholder_contains": "Matcher (contains, e.g. deploy|release)",
+      "skills_inert_warning": "These skills can't fire on this configuration: {{skills}}. To save, switch to UserPromptSubmit or AgentSpawn without a command — or remove the skills."
     },
     "kiroCrewAgentsPage": {
       "a_unique_identifier_for_this_workspace_agents_re": "此工作区的唯一标识符。代理通过名称引用工作区。",

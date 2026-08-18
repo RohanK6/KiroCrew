@@ -7808,9 +7808,10 @@
       "toolDetails": {
         "auto": "자동",
         "details_unavailable_for_historical_tool_calls": "과거 도구 호출의 세부 정보는 표시할 수 없습니다.",
+        "formatted": "서식",
         "no_input_or_output_captured_for_this_tool_call": "이 도구 호출의 입력 또는 출력이 기록되지 않았습니다.",
-        "not_yet_available": "{{label}}은(는) 아직 사용할 수 없습니다",
         "null": "null",
+        "raw": "원문",
         "render_escaped_whitespace_as_real_line_breaks": "이스케이프된 공백을 실제 줄바꿈으로 표시",
         "show_the_exact_payload_escaping_preserved": "이스케이프를 유지한 채 정확한 페이로드 표시",
         "waiting_for_approval": "승인 대기 중"
@@ -8610,7 +8611,10 @@
       "timeout": "제한 시간",
       "total": "합계",
       "total_runs": "총 실행 횟수",
-      "user": "사용자"
+      "user": "사용자",
+      "matcher_placeholder_regex": "Matcher (regex, e.g. \\b(auth|login)\\b)",
+      "matcher_placeholder_contains": "Matcher (contains, e.g. deploy|release)",
+      "skills_inert_warning": "These skills can't fire on this configuration: {{skills}}. To save, switch to UserPromptSubmit or AgentSpawn without a command — or remove the skills."
     },
     "kiroCrewAgentsPage": {
       "a_unique_identifier_for_this_workspace_agents_re": "이 워크스페이스의 고유 식별자입니다. 에이전트는 이름으로 워크스페이스를 참조합니다.",

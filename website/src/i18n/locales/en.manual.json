@@ -2786,8 +2786,9 @@
       },
       "toolDetails": {
         "details_unavailable_for_historical_tool_calls": "Details unavailable for historical tool calls.",
+        "formatted": "Formatted",
         "no_input_or_output_captured_for_this_tool_call": "No input or output captured for this tool call.",
-        "not_yet_available": "{{label}} not yet available",
+        "raw": "Raw",
         "render_escaped_whitespace_as_real_line_breaks": "Render escaped whitespace as real line breaks",
         "show_the_exact_payload_escaping_preserved": "Show the exact payload, escaping preserved"
       },
@@ -3243,7 +3244,10 @@
       "script_hooks_fire_shell_commands_on_chat_lifecyc": "Script hooks fire shell commands on chat lifecycle events. PreToolUse/PostToolUse hooks can filter by tool name pattern.",
       "source": "Source",
       "total": "Total",
-      "total_runs": "Total Runs"
+      "total_runs": "Total Runs",
+      "matcher_placeholder_regex": "Matcher (regex, e.g. \\b(auth|login)\\b)",
+      "matcher_placeholder_contains": "Matcher (contains, e.g. deploy|release)",
+      "skills_inert_warning": "These skills can't fire on this configuration: {{skills}}. To save, switch to UserPromptSubmit or AgentSpawn without a command — or remove the skills."
     },
     "kiroCrewAgentsPage": {
       "a_unique_identifier_for_this_workspace_agents_re": "A unique identifier for this workspace. Agents reference workspaces by name.",

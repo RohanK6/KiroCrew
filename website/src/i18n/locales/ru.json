@@ -8117,9 +8117,10 @@
       "toolDetails": {
         "auto": "Авто",
         "details_unavailable_for_historical_tool_calls": "Подробности недоступны для прошлых вызовов инструментов.",
+        "formatted": "Форматировано",
         "no_input_or_output_captured_for_this_tool_call": "Для этого вызова инструмента не записаны входные и выходные данные.",
-        "not_yet_available": "{{label}} пока недоступно",
         "null": "null",
+        "raw": "Исходник",
         "render_escaped_whitespace_as_real_line_breaks": "Отображать экранированные пробелы как настоящие переводы строк",
         "show_the_exact_payload_escaping_preserved": "Показать точные данные, экранирование сохранено",
         "waiting_for_approval": "Ожидает подтверждения"
@@ -8943,7 +8944,10 @@
       "timeout": "Тайм-аут",
       "total": "Всего",
       "total_runs": "Всего запусков",
-      "user": "пользовательский"
+      "user": "пользовательский",
+      "matcher_placeholder_regex": "Matcher (regex, e.g. \\b(auth|login)\\b)",
+      "matcher_placeholder_contains": "Matcher (contains, e.g. deploy|release)",
+      "skills_inert_warning": "These skills can't fire on this configuration: {{skills}}. To save, switch to UserPromptSubmit or AgentSpawn without a command — or remove the skills."
     },
     "kiroCrewAgentsPage": {
       "a_unique_identifier_for_this_workspace_agents_re": "Уникальный идентификатор этой рабочей области. Агенты ссылаются на рабочие области по имени.",
