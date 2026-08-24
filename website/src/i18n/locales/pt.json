@@ -9294,6 +9294,7 @@
       "status": "Status",
       "test": "Testar",
       "test_result": "Resultado do teste",
+      "test_failed": "Falha no teste",
       "timeout": "Tempo limite",
       "total": "Total",
       "total_runs": "Total de execuções",
