@@ -1106,7 +1106,7 @@ def _update(force: bool = False) -> None:
             ["git", "rev-list", "--count", "--left-right", f"HEAD...origin/{branch}"],
             cwd=proj,
             capture_output=True,
-            text=True,
+            **UTF8_TEXT,
             timeout=10,
         )
         if result.returncode != 0:
@@ -1785,7 +1785,7 @@ def _logs_cmd(args: argparse.Namespace) -> None:
         probe = subprocess.run(
             ["journalctl", "-u", unit, "-n", "1", "--no-pager"],
             capture_output=True,
-            text=True,
+            **UTF8_TEXT,
             check=False,
         )
         if probe.returncode == 0 and probe.stdout.strip():
