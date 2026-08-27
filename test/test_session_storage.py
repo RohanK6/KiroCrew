@@ -886,18 +886,20 @@ class TestTrashBatchNamesAreLogSafe:
             def is_dir() -> bool:
                 return True
 
-        manifests: dict[str, tuple[dict[str, object], list[dict[str, object]]] | None] = {
+        # list_trash now calls _read_manifest_summary (count-only, O(1) memory)
+        # rather than _read_manifest. The return shape is (header, count, bytes) | None.
+        summaries: dict[str, tuple[dict[str, object], int, float] | None] = {
             "missing": None,
-            "disagreeing": ({"batch_id": "someone-else", "created_at": _NOW}, []),
+            "disagreeing": ({"batch_id": "someone-else", "created_at": _NOW}, 0, 0.0),
         }
-        for label, parsed in manifests.items():
+        for label, summary in summaries.items():
             caplog.clear()
             monkeypatch.setattr(session_storage.Path, "iterdir", lambda self: iter([_ForgedDir()]))
             monkeypatch.setattr(
                 session_storage.platform_compat, "is_link_or_junction", lambda p: False
             )
             monkeypatch.setattr(
-                session_storage, "_read_manifest", lambda batch, parsed=parsed: parsed
+                session_storage, "_read_manifest_summary", lambda batch, summary=summary: summary
             )
 
             with caplog.at_level(logging.DEBUG, logger="kiro_crew.session_storage"):
@@ -1811,6 +1813,99 @@ class TestTrashAccounting:
             first.batch_id,
         ]
 
+    def test_list_trash_count_and_bytes_match_entries_with_trailing_partial(
+        self, stores: tuple[Path, Path]
+    ) -> None:
+        """list_trash reports exact session count and byte total via the summary path.
+
+        Exercises _read_manifest_summary: N entry lines, one trailing partial
+        line (crash mid-append), and verifies that sessions==N and bytes equals
+        the per-entry sum while the partial line is silently tolerated.
+        """
+        _, kiro_home = stores
+        # Create N sessions with known sizes so expected bytes are computable.
+        for i in range(1, 4):
+            _cli_half(kiro_home, f"sess{i:04d}", log_bytes=i * 100 + 10, age_days=40)
+        sids = [f"sess{i:04d}" for i in range(1, 4)]
+
+        batch = session_storage.move_to_trash(sids, reason="test-summary", index=_index(), now=_NOW)
+
+        # Read back what move_to_trash wrote so we can measure actual entry bytes.
+        manifest_path = (
+            session_storage.trash_root() / batch.batch_id / session_storage.MANIFEST_NAME
+        )
+        raw = manifest_path.read_text(encoding="utf-8")
+        lines = raw.splitlines()
+        # lines[0] is the header; lines[1:] are the entry lines.
+        entry_lines = lines[1:]
+        expected_count = len(entry_lines)
+        expected_bytes = sum(
+            session_storage._entry_bytes(json.loads(line)) for line in entry_lines if line.strip()
+        )
+
+        # Append a trailing partial line (simulates a crash mid-append).
+        manifest_path.write_text(raw + '{"uid": "partial', encoding="utf-8")
+
+        listed = session_storage.list_trash()
+
+        assert len(listed) == 1
+        b = listed[0]
+        assert b.sessions == expected_count, f"expected {expected_count} sessions, got {b.sessions}"
+        assert b.bytes == expected_bytes, f"expected {expected_bytes} bytes, got {b.bytes}"
+
+    def test_mid_read_oserror_yields_none_not_truncated(
+        self, stores: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A read error AFTER the header must fail all-or-nothing, not truncate.
+
+        Regression guard: the shared record iterator must not swallow a
+        mid-iteration OSError into a valid-but-short entries list, or
+        _restore_locked would restore only the prefix and then delete the
+        unrestored remainder. Both _read_manifest and _read_manifest_summary
+        must return None when the read fails after yielding some records.
+        """
+        _, kiro_home = stores
+        for i in range(1, 4):
+            _cli_half(kiro_home, f"sess{i:04d}", log_bytes=32, age_days=40)
+        sids = [f"sess{i:04d}" for i in range(1, 4)]
+        batch = session_storage.move_to_trash(sids, reason="midread", index=_index(), now=_NOW)
+        batch_dir = session_storage.trash_root() / batch.batch_id
+
+        real_open = Path.open
+
+        class _BlowUpAfterHeader:
+            """File-like wrapper: yields the first line, then raises OSError."""
+
+            def __init__(self, fh: object) -> None:
+                self._fh = fh
+                self._served_header = False
+
+            def __enter__(self) -> "_BlowUpAfterHeader":
+                return self
+
+            def __exit__(self, *exc: object) -> None:
+                self._fh.__exit__(*exc)  # type: ignore[attr-defined]
+
+            def __iter__(self) -> "_BlowUpAfterHeader":
+                return self
+
+            def __next__(self) -> str:
+                if self._served_header:
+                    raise OSError("simulated mid-read failure")
+                self._served_header = True
+                return next(iter(self._fh))  # type: ignore[arg-type]
+
+        def failing_open(self: Path, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+            fh = real_open(self, *args, **kwargs)
+            if self.name == session_storage.MANIFEST_NAME:
+                return _BlowUpAfterHeader(fh)
+            return fh
+
+        monkeypatch.setattr(Path, "open", failing_open)
+
+        assert session_storage._read_manifest(batch_dir) is None
+        assert session_storage._read_manifest_summary(batch_dir) is None
+
 
 class TestLegacyStems:
     """One session can own more than one transcript filename."""
@@ -2278,17 +2373,28 @@ class TestSingleTrashPass:
 
     @staticmethod
     def _counted_manifest_reads(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
-        """Count via ``_read_manifest``: it is the per-batch cost, and it is hit
-        through the module global, so it sees every ``list_trash`` pass no matter
-        which module's imported name made the call."""
+        """Count per-batch manifest reads regardless of which reader is used.
+
+        ``list_trash`` now calls ``_read_manifest_summary`` (count-only, O(1)
+        memory), while restore paths still call ``_read_manifest`` (full
+        entries). Patching both and sharing one ``reads`` list keeps the
+        'exactly once' assertion reader-agnostic: it captures every manifest
+        read no matter which code path issued it.
+        """
         reads: list[Path] = []
-        real = session_storage._read_manifest
+        real_manifest = session_storage._read_manifest
+        real_summary = session_storage._read_manifest_summary
 
-        def counted(batch: Path):
+        def counted_manifest(batch: Path):
             reads.append(batch)
-            return real(batch)
+            return real_manifest(batch)
 
-        monkeypatch.setattr(session_storage, "_read_manifest", counted)
+        def counted_summary(batch: Path):
+            reads.append(batch)
+            return real_summary(batch)
+
+        monkeypatch.setattr(session_storage, "_read_manifest", counted_manifest)
+        monkeypatch.setattr(session_storage, "_read_manifest_summary", counted_summary)
         return reads
 
     def test_report_payload_reads_each_manifest_exactly_once(

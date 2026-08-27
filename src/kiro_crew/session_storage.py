@@ -1277,6 +1277,34 @@ def _append_entry(handle: IO[str], entry: dict[str, Any]) -> None:
     handle.flush()
 
 
+def _iter_manifest_records(batch: Path) -> Iterator[dict[str, Any]]:
+    """Yield each parsed dict record from a batch manifest.
+
+    A file that cannot be OPENED yields nothing (caller sees an empty stream,
+    same as an empty manifest). A read error that occurs MID-ITERATION is NOT
+    swallowed — it propagates as OSError so the caller can fail all-or-nothing
+    rather than act on a silently truncated prefix (restoring only part of a
+    batch and then deleting the unrestored remainder). Blank / non-JSON /
+    non-dict lines are skipped; a trailing partial line (crash mid-append) is
+    tolerated. The FIRST yielded dict is the header; the rest are entries.
+    """
+    try:
+        fh = (batch / MANIFEST_NAME).open(encoding="utf-8")
+    except OSError:
+        return
+    with fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(record, dict):
+                yield record
+
+
 def _read_manifest(batch: Path) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
     """Parse a batch manifest into its header and session entries.
 
@@ -1284,26 +1312,19 @@ def _read_manifest(batch: Path) -> tuple[dict[str, Any], list[dict[str, Any]]] |
     the whole batch: every complete line before it describes real moved files that
     must stay restorable.
     """
-    try:
-        raw = (batch / MANIFEST_NAME).read_text(encoding="utf-8")
-    except OSError:
-        return None
     header: dict[str, Any] | None = None
     entries: list[dict[str, Any]] = []
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            record = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(record, dict):
-            continue
-        if header is None:
-            header = record
-            continue
-        entries.append(record)
+    try:
+        for record in _iter_manifest_records(batch):
+            if header is None:
+                header = record
+            else:
+                entries.append(record)
+    except OSError:
+        # A mid-read I/O error must not yield a truncated-but-valid batch:
+        # _restore_locked would restore only the prefix and then delete the
+        # unrestored remainder. Fail all-or-nothing, as read_text() did.
+        return None
     if header is None or header.get("schema") != MANIFEST_SCHEMA:
         return None
     return header, entries
@@ -1330,6 +1351,38 @@ def _entry_bytes(entry: dict[str, Any]) -> int:
             if isinstance(size, int):
                 total += size
     return total
+
+
+def _read_manifest_summary(
+    batch: Path,
+) -> tuple[dict[str, Any], int, int] | None:
+    """Parse a batch manifest and return only the header plus aggregate counts.
+
+    Instead of materialising every entry dict, this function accumulates a
+    session count and a total-bytes sum as it streams each line.  Peak memory
+    stays at O(one line), making it safe to call on large batches.
+
+    Parse semantics are identical to :func:`_read_manifest`: OSError → None;
+    blank / non-JSON / non-dict lines skipped; first dict is the header; schema
+    check applied; a trailing partial line (crash mid-append) is tolerated.
+    """
+    header: dict[str, Any] | None = None
+    count = 0
+    total_bytes = 0
+    try:
+        for record in _iter_manifest_records(batch):
+            if header is None:
+                header = record
+            else:
+                count += 1
+                total_bytes += _entry_bytes(record)
+    except OSError:
+        # Mid-read I/O error: return None rather than an undercount that would
+        # misreport the batch's size in the trash listing.
+        return None
+    if header is None or header.get("schema") != MANIFEST_SCHEMA:
+        return None
+    return header, count, total_bytes
 
 
 def move_to_trash(
@@ -1588,13 +1641,13 @@ def list_trash() -> list[TrashBatch]:
         # listed as a real batch and the sweep would delete through it.
         if platform_compat.is_link_or_junction(candidate) or not candidate.is_dir():
             continue
-        parsed = _read_manifest(candidate)
-        if parsed is None:
+        summary = _read_manifest_summary(candidate)
+        if summary is None:
             # %r: the directory name is agent-controlled; repr keeps an embedded
             # newline from forging additional log records.
             logger.debug("trash batch %r has no readable manifest", candidate.name)
             continue
-        header, entries = parsed
+        header, count, total_bytes = summary
         # The DIRECTORY is the batch's identity. A header that names a different
         # batch would make a targeted empty delete the batch it named instead of
         # the one it came from, so a disagreement is treated as corruption rather
@@ -1614,8 +1667,8 @@ def list_trash() -> list[TrashBatch]:
                 batch_id=candidate.name,
                 created_at=float(created) if isinstance(created, (int, float)) else 0.0,
                 reason=str(header.get("reason") or ""),
-                sessions=len(entries),
-                bytes=sum(_entry_bytes(e) for e in entries),
+                sessions=count,
+                bytes=total_bytes,
             )
         )
     batches.sort(key=lambda b: b.created_at, reverse=True)
