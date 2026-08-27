@@ -253,6 +253,9 @@ def clear_tombstone(agent_id: str) -> bool:
 
 # ── slow-command record (stalled but STILL RUNNING) ──────────────────
 
+_SLOW_COMMANDS_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+_SLOW_COMMANDS_KEEP_LINES = 10_000
+
 
 def record_slow_command(agent_id: str, **fields: object) -> None:
     """Append a stalled subagent's slow command to ``slow_commands.jsonl``.
@@ -261,6 +264,11 @@ def record_slow_command(agent_id: str, **fields: object) -> None:
     stalled subagent is still running; the record is purely for later analysis
     of which commands run slow. Append-only, at the subagents-dir root so it
     survives per-agent folder cleanup. Best-effort: never raises to the caller.
+
+    After each append the file size is checked; if it exceeds
+    :data:`_SLOW_COMMANDS_MAX_BYTES` the file is atomically truncated to the
+    last :data:`_SLOW_COMMANDS_KEEP_LINES` lines so it never grows unbounded
+    over a long-lived gateway. The trim is itself best-effort and never raises.
     """
     entry = {"id": agent_id, "flagged": time.time(), **fields}
     base = _subagents_dir()
@@ -270,6 +278,28 @@ def record_slow_command(agent_id: str, **fields: object) -> None:
             fh.write(json.dumps(entry, default=str) + "\n")
     except OSError:
         logger.warning("record_slow_command failed for %s", agent_id, exc_info=True)
+        return
+
+    # Best-effort rotation: trim to last N lines when the file exceeds the
+    # size threshold.  A failed trim must never break recording.
+    slow_path = base / "slow_commands.jsonl"
+    try:
+        if os.stat(slow_path).st_size > _SLOW_COMMANDS_MAX_BYTES:
+            lines = slow_path.read_text(encoding="utf-8").splitlines(keepends=True)
+            trimmed = lines[-_SLOW_COMMANDS_KEEP_LINES:]
+            fd, tmp = tempfile.mkstemp(dir=base, prefix=".slow_commands_tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.writelines(trimmed)
+                os.replace(tmp, slow_path)
+            except BaseException:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+    except OSError:
+        logger.debug("record_slow_command trim failed for %s", agent_id, exc_info=True)
 
 
 # ── delete ───────────────────────────────────────────────────────────

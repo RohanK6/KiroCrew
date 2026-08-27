@@ -1257,3 +1257,91 @@ class TestRecordSlowCommand:
         lines = (agent_root / "slow_commands.jsonl").read_text(encoding="utf-8").strip().splitlines()
         assert len(lines) == 2
         assert {json.loads(lines[0])["id"], json.loads(lines[1])["id"]} == {"ag1", "ag2"}
+
+# ── record_slow_command rotation ─────────────────────────────────────
+
+
+class TestRecordSlowCommandRotation:
+    """Verify slow_commands.jsonl is trimmed when it exceeds the size threshold."""
+
+    def _slow_path(self, agent_root):
+        return agent_root / "slow_commands.jsonl"
+
+    def test_appends_entry_below_threshold(self, agent_root):
+        record_slow_command("a1", cmd="sleep", duration=30)
+        lines = self._slow_path(agent_root).read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 1
+        entry = json.loads(lines[0])
+        assert entry["id"] == "a1"
+        assert entry["cmd"] == "sleep"
+
+    def test_trim_keeps_last_n_lines_and_drops_oldest(self, agent_root, monkeypatch):
+        import kiro_crew.subagent_persistence as sp
+
+        monkeypatch.setattr(sp, "_SLOW_COMMANDS_MAX_BYTES", 0)  # always trim
+        monkeypatch.setattr(sp, "_SLOW_COMMANDS_KEEP_LINES", 3)
+
+        # Write 5 entries manually so we control their order
+        slow = self._slow_path(agent_root)
+        agent_root.mkdir(parents=True, exist_ok=True)
+        for i in range(5):
+            slow.write_text(
+                slow.read_text(encoding="utf-8") if slow.exists() else "",
+                encoding="utf-8",
+            )
+            with open(slow, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"id": f"old{i}", "seq": i}) + "\n")
+
+        # One more call triggers the trim
+        record_slow_command("newest", seq=99)
+
+        lines = self._slow_path(agent_root).read_text(encoding="utf-8").splitlines()
+        assert len(lines) <= 3, f"Expected <=3 lines after trim, got {len(lines)}"
+
+        ids = [json.loads(l)["id"] for l in lines]
+        assert "newest" in ids, "Most recent entry must be retained"
+        assert "old0" not in ids, "Oldest entries must be dropped"
+
+    def test_trim_triggered_by_real_threshold(self, agent_root, monkeypatch):
+        import kiro_crew.subagent_persistence as sp
+
+        # Cap = 200 bytes, keep = 5 lines — forces trim after enough entries
+        monkeypatch.setattr(sp, "_SLOW_COMMANDS_MAX_BYTES", 200)
+        monkeypatch.setattr(sp, "_SLOW_COMMANDS_KEEP_LINES", 5)
+
+        for i in range(20):
+            record_slow_command(f"agent{i}", cmd="long_running_tool", duration=120)
+
+        lines = self._slow_path(agent_root).read_text(encoding="utf-8").splitlines()
+        assert len(lines) <= 5
+        # Most recent entry preserved
+        last = json.loads(lines[-1])
+        assert last["id"] == "agent19"
+
+    def test_no_trim_below_threshold(self, agent_root, monkeypatch):
+        import kiro_crew.subagent_persistence as sp
+
+        monkeypatch.setattr(sp, "_SLOW_COMMANDS_MAX_BYTES", 10 * 1024 * 1024)  # 10 MB
+
+        for i in range(10):
+            record_slow_command(f"b{i}", cmd="cmd")
+
+        lines = self._slow_path(agent_root).read_text(encoding="utf-8").splitlines()
+        assert len(lines) == 10  # no trim, all retained
+
+    def test_failed_trim_does_not_raise(self, agent_root, monkeypatch):
+        import kiro_crew.subagent_persistence as sp
+
+        monkeypatch.setattr(sp, "_SLOW_COMMANDS_MAX_BYTES", 0)  # always trim
+
+        # Make the file read-only so the atomic rewrite fails
+        slow = self._slow_path(agent_root)
+        agent_root.mkdir(parents=True, exist_ok=True)
+        slow.write_text(json.dumps({"id": "x"}) + "\n", encoding="utf-8")
+        slow.chmod(0o444)
+
+        try:
+            # Must not raise despite the trim failing
+            record_slow_command("c1", cmd="test")
+        finally:
+            slow.chmod(0o644)  # restore for cleanup
