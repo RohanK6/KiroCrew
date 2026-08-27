@@ -2844,7 +2844,10 @@ async def start_dashboard(
     await asyncio.to_thread(state.load_cron_folders)
     # Off-loop: a large chat_pins.json must not block the event loop at startup.
     await asyncio.to_thread(state.load_chat_pins)
-    state.load_tags()
+    # Off-loop: load_tags runs a synchronous save_tags() during load (status
+    # back-fill / seed) which fsyncs on the event loop; a large tags.json —
+    # including preserved-but-malformed rows (#5792) — must not stall startup.
+    await asyncio.to_thread(state.load_tags)
     app["port"] = port
     app["dashboard_url"] = dashboard_url
 
@@ -3840,7 +3843,10 @@ async def start_api_server(
     await asyncio.to_thread(state.load_cron_folders)
     # Off-loop: a large chat_pins.json must not block the event loop at startup.
     await asyncio.to_thread(state.load_chat_pins)
-    state.load_tags()
+    # Off-loop: load_tags runs a synchronous save_tags() during load (status
+    # back-fill / seed) which fsyncs on the event loop; a large tags.json —
+    # including preserved-but-malformed rows (#5792) — must not stall startup.
+    await asyncio.to_thread(state.load_tags)
     app["port"] = port
 
     _precompute_telemetry(state)
