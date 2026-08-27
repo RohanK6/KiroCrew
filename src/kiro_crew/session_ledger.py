@@ -183,11 +183,11 @@ def _locked(dir_path: Path) -> Iterator[None]:
     with ``OSError`` rather than entering the critical section unserialized
     or parking a worker thread on a wedged holder forever.
     """
+    deadline = time.monotonic() + _LOCK_TIMEOUT_SECS
     dir_path.mkdir(parents=True, exist_ok=True)
     lock_path = dir_path / _LOCK_FILE
     fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
     try:
-        deadline = time.monotonic() + _LOCK_TIMEOUT_SECS
         while not try_acquire_lock(fd, exclusive=True):
             if time.monotonic() >= deadline:
                 raise OSError("ledger lock is held by another process; try again")
