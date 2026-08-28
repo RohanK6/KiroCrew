@@ -85,7 +85,13 @@ import ChatSidebar from '../pages/ChatSidebar'
 import type { RootState } from '../store'
 import type { ChatSlot } from '../types'
 
-const LAST_TS = '2026-08-26T18:00:00Z'
+// Relative to now, not a fixed date: ChatSidebar collapses rows idle for more
+// than DEFAULT_STALE_COLLAPSE_MS (2 days) behind a hidden "Dormant sessions"
+// expander under the default date-desc sort. A hard-coded past timestamp is a
+// time-bomb — it reads "fresh" until wall-clock time crosses the threshold, then
+// every row collapses out of the DOM and the whole file fails with "no row
+// titled …" for reasons unrelated to the effective-agent marker under test.
+const LAST_TS = new Date().toISOString()
 
 const SLOTS: ChatSlot[] = [
   // The divergence: bound to a `mochi` that nothing dispatches, so `kirocrew`
