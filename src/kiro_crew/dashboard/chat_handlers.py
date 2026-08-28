@@ -51,6 +51,7 @@ from kiro_crew.dashboard.chat_persistence import (
     COLOR_HEX_RE,
     _attach_variants,
     _rehydrate_slot_title,
+    _rehydrate_slot_trust,
     get_reasoning_effort_values,
     save_slot_off_loop,
 )
@@ -5765,6 +5766,7 @@ async def api_chat_slot_resume(request: web.Request) -> web.Response:
         # Resuming from History must carry the filing marker forward, or the
         # next save of this slot drops it and the conversation is re-filed.
         slot._channel_folder_filed = True
+    _rehydrate_slot_trust(slot, meta)
     if meta.get("folder_id"):
         slot.folder_id = meta["folder_id"]
         # Re-engaging a hidden empty folder (Model B) un-hides it so it stays

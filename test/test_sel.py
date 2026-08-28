@@ -2347,8 +2347,14 @@ class TestHmacKeyTrustDirMigration:
 
     def test_key_bytes_accessor_has_exactly_one_production_caller(self) -> None:
         """Handing out raw trust-root bytes is safe only under the file-first
-        ordering its ONE caller enforces; a second caller would inherit none of
-        it. Pin the caller set rather than trusting the underscore."""
+        ordering its callers enforce; a caller that reached for memory first
+        would inherit none of it. Pin the caller set rather than trusting the
+        underscore. Sanctioned callers, each mirroring
+        ``session_pid_sig._load_hmac_key``'s file-first-then-memory fallback:
+        ``session_pid_sig.py`` (pid->session sidecar) and ``dashboard/trust_sig.py``
+        (per-session trust sidecar). Adding a caller here is a deliberate review
+        gate, not a formality — the new caller MUST prefer the file and use the
+        in-memory bytes only as a fallback."""
         root = Path(__file__).resolve().parents[1] / "src" / "kiro_crew"
         callers = {
             path
@@ -2358,9 +2364,10 @@ class TestHmacKeyTrustDirMigration:
             # cannot decode the non-ASCII bytes several sources contain.
             and "_sel_hmac_key_bytes" in path.read_text(encoding="utf-8")
         }
-        assert callers == {root / "session_pid_sig.py"}, (
-            f"_sel_hmac_key_bytes gained a caller outside session_pid_sig: {callers}"
-        )
+        assert callers == {
+            root / "session_pid_sig.py",
+            root / "dashboard" / "trust_sig.py",
+        }, f"_sel_hmac_key_bytes caller set changed unexpectedly: {callers}"
 
     def test_concurrent_first_construction_initializes_once(self, tmp_path: Path) -> None:
         """``__new__`` publishes the instance BEFORE ``__init__`` runs, so two

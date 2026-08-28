@@ -123,20 +123,45 @@ class TestRestoreRecentSessions:
         restore_recent_sessions(state, window_minutes=60)
         assert state._slots["nomode"].mode == ""
 
-    def test_trust_flags_not_restored(self, tmp_path, monkeypatch):
-        """Trust flags in metadata are NOT restored — security boundary."""
+    def test_trust_flags_restored(self, tmp_path, monkeypatch):
+        """Per-session trust flags ARE restored on bulk startup restore when the
+        grant carries a valid signature.
+
+        Previously these were dropped so the user re-approved every restored
+        conversation after a gateway restart. The grant is session-scoped (the
+        meta line IS this session's record) and now round-trips; a forged or
+        unsigned grant still fails closed (see TestSessionTrustPersistence)."""
+        from unittest.mock import patch
+
+        from kiro_crew.dashboard import trust_sig
+        from kiro_crew.dashboard.chat_utils import slot_history_key
+        from kiro_crew.dashboard.state import _ChatSlot
+
         monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
-        _write_session(
-            tmp_path,
-            "dashboard_trusted",
-            [{"role": "user", "content": "hi", "ts": "2026-03-23T10:00:00"}],
-            meta={"title": "Trusted", "trust": True, "trust_reads": True},
-        )
-        (tmp_path / "dashboard_trusted.jsonl").touch()
-        state = _make_state(tmp_path)
-        restore_recent_sessions(state, window_minutes=60)
-        assert state._slots["trusted"]._trust is False
-        assert state._slots["trusted"]._trust_reads is False
+        (tmp_path / "sel_hmac.key").write_bytes(b"\x03" * 32)
+        with (
+            patch.object(trust_sig, "sel_hmac_key_path", return_value=tmp_path / "sel_hmac.key"),
+            patch.object(trust_sig, "_sel_hmac_key_bytes", return_value=None),
+        ):
+            hk = slot_history_key(_ChatSlot("trusted"))
+            sig, at = trust_sig.sign_trust(hk, trust=True)
+            _write_session(
+                tmp_path,
+                "dashboard_trusted",
+                [{"role": "user", "content": "hi", "ts": "2026-03-23T10:00:00"}],
+                meta={
+                    "title": "Trusted",
+                    "trust": True,
+                    "trust_sig": sig,
+                    "trust_at": at,
+                },
+            )
+            (tmp_path / "dashboard_trusted.jsonl").touch()
+            state = _make_state(tmp_path)
+            restore_recent_sessions(state, window_minutes=60)
+            assert state._slots["trusted"]._trust is True
+            # Ad-hoc trust_reads is never persisted → restores cleared.
+            assert state._slots["trusted"]._trust_reads is False
 
     def test_skips_old_sessions(self, tmp_path, monkeypatch):
         """Sessions older than the window are not restored."""
@@ -1649,3 +1674,420 @@ class TestAsyncRestoreRecentSessionsOffLoop:
         assert not (
             tmp_path / "dashboard_vanished.jsonl"
         ).exists(), "the deleted transcript came back"
+
+
+# ── per-session trust persistence (issue: re-trust after every restart) ──
+
+
+def _sign_trusted_slot_meta(
+    history_key: str,
+    *,
+    trust: bool = True,
+    issued_at: int | None = None,
+) -> dict:
+    """Build a signed trust meta fragment for direct-write restore tests.
+
+    Only the explicit session-wide ``_trust`` grant is persisted, so the
+    fragment carries just ``trust`` + ``trust_sig`` + ``trust_at``.
+    """
+    from kiro_crew.dashboard.trust_sig import sign_trust
+
+    sig, at = sign_trust(history_key, trust=trust, issued_at=issued_at)
+    frag: dict = {"trust_sig": sig, "trust_at": at}
+    if trust:
+        frag["trust"] = True
+    return frag
+
+
+class TestSessionTrustPersistence:
+    """A "trust this session" grant, a "trust read-only bash" grant, and the
+    per-command fnmatch grants are session-scoped auto-approve state that used
+    to be in-memory only, so a gateway restart silently revoked them and the
+    user had to re-approve every restored conversation. These pin that the
+    grant now round-trips through the slot's persisted meta line — keyed to the
+    session it was made in — AND that it is HMAC-signed with the agent-unreadable
+    SEL trust root so a forged/tampered/replayed grant fails closed to no trust
+    (the GPT/Design finding on the agent-writable dashboard_*.jsonl)."""
+
+    @pytest.fixture(autouse=True)
+    def _sel_key(self, tmp_path):
+        """Give trust_sig a real, resolvable SEL trust-root key under tmp_path.
+
+        Mirrors test_session_pid_sig's cfg fixture: write sel_hmac.key, patch
+        the canonical path accessor, and stub the in-memory fallback to None so
+        the FILE is the single source of truth in-test."""
+        from unittest.mock import patch
+
+        from kiro_crew.dashboard import trust_sig
+
+        (tmp_path / "sel_hmac.key").write_bytes(b"\x02" * 32)
+        with (
+            patch.object(trust_sig, "sel_hmac_key_path", return_value=tmp_path / "sel_hmac.key"),
+            patch.object(trust_sig, "_sel_hmac_key_bytes", return_value=None),
+        ):
+            yield
+
+    def test_only_explicit_trust_persisted_not_ad_hoc(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        state = _make_state(tmp_path)
+        slot = state.get_or_create_slot("trustslot")
+        slot._trust = True
+        # Ad-hoc approvals present in memory — these must NOT be persisted.
+        slot._trust_reads = True
+        slot._trusted_patterns = {"git status", "ls *"}
+        slot.append("user", "hello")
+        slot.drain()
+
+        from kiro_crew.dashboard.chat import _save_slot_to_history
+
+        _save_slot_to_history(state, slot)
+
+        path = tmp_path / "dashboard_trustslot.jsonl"
+        meta = json.loads(path.read_text(encoding="utf-8").split("\n")[0])
+        # Only the explicit session-wide grant persists.
+        assert meta["trust"] is True
+        assert len(meta["trust_sig"]) == 64
+        # Ad-hoc per-prompt approvals are deliberately dropped (re-prompt on restart).
+        assert "trust_reads" not in meta
+        assert "trusted_patterns" not in meta
+
+    def test_untrusted_session_writes_no_trust_keys(self, tmp_path, monkeypatch):
+        """A session the user never trusted leaves its meta line clean — no
+        trust keys, no signature — so its restore is unambiguously fail-closed."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        state = _make_state(tmp_path)
+        slot = state.get_or_create_slot("plainslot")
+        slot.append("user", "hello")
+        slot.drain()
+
+        from kiro_crew.dashboard.chat import _save_slot_to_history
+
+        _save_slot_to_history(state, slot)
+
+        path = tmp_path / "dashboard_plainslot.jsonl"
+        meta = json.loads(path.read_text(encoding="utf-8").split("\n")[0])
+        assert "trust" not in meta
+        assert "trust_reads" not in meta
+        assert "trusted_patterns" not in meta
+        assert "trust_sig" not in meta
+
+    def test_rehydrate_restores_signed_trust(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        from kiro_crew.dashboard.chat import _rehydrate_slot_from_history
+        from kiro_crew.dashboard.chat_utils import slot_history_key
+        from kiro_crew.dashboard.state import _ChatSlot
+
+        hk = slot_history_key(_ChatSlot("trusted"))
+        _write_session(
+            tmp_path,
+            "dashboard_trusted",
+            [{"role": "user", "content": "x", "ts": "2026-03-23T10:00:00"}],
+            meta={
+                "title": "Trusted",
+                **_sign_trusted_slot_meta(hk, trust=True),
+            },
+        )
+        state = _make_state(tmp_path)
+        slot = _rehydrate_slot_from_history(state, "trusted")
+        assert slot is not None
+        assert slot._trust is True
+        # Ad-hoc grants are never persisted, so they restore cleared.
+        assert slot._trust_reads is False
+        assert slot._trusted_patterns == set()
+
+    def test_rehydrate_untrusted_session_is_fail_closed(self, tmp_path, monkeypatch):
+        """A restored session with no trust keys comes back fully untrusted."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        _write_session(
+            tmp_path,
+            "dashboard_plain",
+            [{"role": "user", "content": "x", "ts": "2026-03-23T10:00:00"}],
+            meta={"title": "Plain"},
+        )
+        from kiro_crew.dashboard.chat import _rehydrate_slot_from_history
+
+        state = _make_state(tmp_path)
+        slot = _rehydrate_slot_from_history(state, "plain")
+        assert slot is not None
+        assert slot._trust is False
+        assert slot._trust_reads is False
+        assert slot._trusted_patterns == set()
+
+    def test_rehydrate_rejects_unsigned_forged_grant(self, tmp_path, monkeypatch):
+        """THE core threat: an agent writes a well-formed `trust: true` into its
+        own agent-writable history line WITHOUT a valid signature (it cannot
+        read the SEL key to forge one). Restore must fail closed to no trust."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        _write_session(
+            tmp_path,
+            "dashboard_forged",
+            [{"role": "user", "content": "x", "ts": "2026-03-23T10:00:00"}],
+            meta={
+                "title": "Forged",
+                "trust": True,
+                "trust_reads": True,
+                "trusted_patterns": ["rm -rf /"],
+                # an attacker-guessed signature:
+                "trust_sig": "deadbeef" * 8,
+            },
+        )
+        from kiro_crew.dashboard.chat import _rehydrate_slot_from_history
+
+        state = _make_state(tmp_path)
+        slot = _rehydrate_slot_from_history(state, "forged")
+        assert slot is not None
+        assert slot._trust is False
+        assert slot._trust_reads is False
+        assert slot._trusted_patterns == set()
+
+    def test_rehydrate_rejects_grant_with_no_signature(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        _write_session(
+            tmp_path,
+            "dashboard_nosig",
+            [{"role": "user", "content": "x", "ts": "2026-03-23T10:00:00"}],
+            meta={"title": "NoSig", "trust": True},
+        )
+        from kiro_crew.dashboard.chat import _rehydrate_slot_from_history
+
+        state = _make_state(tmp_path)
+        slot = _rehydrate_slot_from_history(state, "nosig")
+        assert slot is not None
+        assert slot._trust is False
+
+    def test_rehydrate_rejects_tampered_field_after_signing(self, tmp_path, monkeypatch):
+        """Tampering any signed field (here the bound issued-at stamp) after
+        signing invalidates the MAC, so the whole grant fails closed."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        from kiro_crew.dashboard.chat import _rehydrate_slot_from_history
+        from kiro_crew.dashboard.chat_utils import slot_history_key
+        from kiro_crew.dashboard.state import _ChatSlot
+
+        hk = slot_history_key(_ChatSlot("escalated"))
+        # Sign a genuine trust grant, then tamper a signed field (trust_at) so
+        # the persisted line no longer matches the MAC — fails closed.
+        frag = _sign_trusted_slot_meta(hk, trust=True)
+        frag["trust_at"] = int(frag["trust_at"]) - 1  # signed value the MAC covered
+        _write_session(
+            tmp_path,
+            "dashboard_escalated",
+            [{"role": "user", "content": "x", "ts": "2026-03-23T10:00:00"}],
+            meta={"title": "Escalated", **frag},
+        )
+        state = _make_state(tmp_path)
+        slot = _rehydrate_slot_from_history(state, "escalated")
+        assert slot is not None
+        assert slot._trust is False
+        assert slot._trust_reads is False
+
+    def test_rehydrate_rejects_expired_grant(self, tmp_path, monkeypatch):
+        """A genuinely-signed grant older than the freshness window restores NO
+        trust: persistence survives a restart for a bounded time, not forever.
+        The user simply re-approves after the window lapses."""
+        import time as _time
+
+        from kiro_crew.dashboard import trust_sig
+        from kiro_crew.dashboard.chat import _rehydrate_slot_from_history
+        from kiro_crew.dashboard.chat_utils import slot_history_key
+        from kiro_crew.dashboard.state import _ChatSlot
+
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        hk = slot_history_key(_ChatSlot("stale"))
+        old = int(_time.time()) - (trust_sig._MAX_AGE_SECONDS + 3600)
+        frag = _sign_trusted_slot_meta(hk, trust=True, issued_at=old)
+        _write_session(
+            tmp_path,
+            "dashboard_stale",
+            [{"role": "user", "content": "x", "ts": "2026-03-23T10:00:00"}],
+            meta={"title": "Stale", **frag},
+        )
+        state = _make_state(tmp_path)
+        slot = _rehydrate_slot_from_history(state, "stale")
+        assert slot is not None
+        assert slot._trust is False
+        assert slot._trust_reads is False
+
+    def test_rehydrate_rejects_cross_session_replay(self, tmp_path, monkeypatch):
+        """A grant signed for session A cannot be replayed onto session B's line:
+        the history key is bound into the MAC."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        from kiro_crew.dashboard.chat import _rehydrate_slot_from_history
+        from kiro_crew.dashboard.chat_utils import slot_history_key
+        from kiro_crew.dashboard.state import _ChatSlot
+
+        other_hk = slot_history_key(_ChatSlot("victimA"))
+        stolen = _sign_trusted_slot_meta(other_hk, trust=True)  # signed for A
+        _write_session(
+            tmp_path,
+            "dashboard_victimB",  # replayed onto B's line
+            [{"role": "user", "content": "x", "ts": "2026-03-23T10:00:00"}],
+            meta={"title": "VictimB", **stolen},
+        )
+        state = _make_state(tmp_path)
+        slot = _rehydrate_slot_from_history(state, "victimB")
+        assert slot is not None
+        assert slot._trust is False
+
+    def test_fork_into_new_session_key_does_not_inherit_trust(self, tmp_path, monkeypatch):
+        """A fork/restore into a NEW session key writes its own meta line and
+        never carries the source session's grant."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        state = _make_state(tmp_path)
+        trusted = state.get_or_create_slot("source")
+        trusted._trust = True
+        trusted.append("user", "hello")
+        trusted.drain()
+
+        fork = state.get_or_create_slot("fork")
+        fork.append("user", "hello")
+        fork.drain()
+
+        from kiro_crew.dashboard.chat import _save_slot_to_history
+
+        _save_slot_to_history(state, trusted)
+        _save_slot_to_history(state, fork)
+
+        fork_meta = json.loads(
+            (tmp_path / "dashboard_fork.jsonl").read_text(encoding="utf-8").split("\n")[0]
+        )
+        assert "trust" not in fork_meta
+
+        from kiro_crew.dashboard.chat import _rehydrate_slot_from_history
+
+        state2 = _make_state(tmp_path)
+        restored_fork = _rehydrate_slot_from_history(state2, "fork")
+        assert restored_fork is not None
+        assert restored_fork._trust is False
+
+    def test_rehydrate_ignores_ad_hoc_keys_on_line(self, tmp_path, monkeypatch):
+        """Ad-hoc grants are never persisted, so even if a line carries
+        ``trust_reads``/``trusted_patterns`` (a legacy write, or a tampered line
+        adding them alongside a valid trust grant), rehydrate restores ONLY
+        ``_trust`` — the ad-hoc fields are not read."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        from kiro_crew.dashboard.chat import _rehydrate_slot_from_history
+        from kiro_crew.dashboard.chat_utils import slot_history_key
+        from kiro_crew.dashboard.state import _ChatSlot
+
+        hk = slot_history_key(_ChatSlot("adhoc"))
+        frag = _sign_trusted_slot_meta(hk, trust=True)  # signs trust only
+        # Attacker/legacy line also carries ad-hoc grant keys — ignored on restore.
+        frag["trust_reads"] = True
+        frag["trusted_patterns"] = ["rm -rf /", "git status"]
+        _write_session(
+            tmp_path,
+            "dashboard_adhoc",
+            [{"role": "user", "content": "x", "ts": "2026-03-23T10:00:00"}],
+            meta={"title": "AdHoc", **frag},
+        )
+        state = _make_state(tmp_path)
+        slot = _rehydrate_slot_from_history(state, "adhoc")
+        assert slot is not None
+        assert slot._trust is True
+        assert slot._trust_reads is False
+        assert slot._trusted_patterns == set()
+
+    def test_trust_round_trips_through_save_and_rehydrate(self, tmp_path, monkeypatch):
+        """End-to-end: grant on a live slot, save (signs), then rehydrate a fresh
+        state from the same on-disk file (verifies) — the exact gateway-restart
+        path the user hits."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        state = _make_state(tmp_path)
+        slot = state.get_or_create_slot("rt")
+        slot._trust = True
+        slot._trusted_patterns = {"git diff"}  # ad-hoc — must not survive restart
+        slot.append("user", "hello")
+        slot.drain()
+
+        from kiro_crew.dashboard.chat import (
+            _rehydrate_slot_from_history,
+            _save_slot_to_history,
+        )
+
+        _save_slot_to_history(state, slot)
+
+        state2 = _make_state(tmp_path)
+        restored = _rehydrate_slot_from_history(state2, "rt")
+        assert restored is not None
+        assert restored._trust is True
+        # Ad-hoc per-command grant is dropped; the user re-approves it.
+        assert restored._trusted_patterns == set()
+
+    def test_revoke_after_trusted_save_clears_on_restart(self, tmp_path, monkeypatch):
+        """Regression (GPT/Opus/Design BLOCK): a session saved TRUSTED, then
+        revoked (mode:normal -> flags False) and re-saved, must NOT restore trust
+        on restart. Without the four trust keys in SLOT_OWNED_META_KEYS,
+        carry_unowned_metadata copied the still-valid signed grant forward and it
+        re-verified — silently resurrecting a revoked grant."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        state = _make_state(tmp_path)
+        slot = state.get_or_create_slot("revoked")
+        slot._trust = True
+        slot._trust_reads = True
+        slot._trusted_patterns = {"git diff"}
+        slot.append("user", "hello")
+        slot.drain()
+
+        from kiro_crew.dashboard.chat import (
+            _rehydrate_slot_from_history,
+            _save_slot_to_history,
+        )
+
+        _save_slot_to_history(state, slot)  # persists trust + sig (existing_meta now has them)
+        # User revokes (mode:normal): all trust flags cleared, slot re-saved.
+        slot._trust = False
+        slot._trust_reads = False
+        slot._trusted_patterns = set()
+        slot.append("user", "revoked now")
+        slot.drain()
+        _save_slot_to_history(state, slot)
+
+        # The on-disk meta line must no longer carry any trust key.
+        meta = json.loads(
+            (tmp_path / "dashboard_revoked.jsonl").read_text(encoding="utf-8").split("\n")[0]
+        )
+        assert "trust" not in meta
+        assert "trust_reads" not in meta
+        assert "trusted_patterns" not in meta
+        assert "trust_sig" not in meta
+
+        state2 = _make_state(tmp_path)
+        restored = _rehydrate_slot_from_history(state2, "revoked")
+        assert restored is not None
+        assert restored._trust is False
+        assert restored._trust_reads is False
+        assert restored._trusted_patterns == set()
+
+    def test_close_after_trusted_save_clears_on_reopen(self, tmp_path, monkeypatch):
+        """Regression: a session saved TRUSTED during normal use, then CLOSED
+        (write gated on `not closed`), must NOT carry the grant forward — the old
+        signed keys are erased on the close save so reopening from History
+        re-prompts. Distinct from test_close_does_not_persist_trust, which closes
+        on the first-ever save (no existing_meta to carry)."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        state = _make_state(tmp_path)
+        slot = state.get_or_create_slot("closedtrust")
+        slot._trust = True
+        slot.append("user", "hello")
+        slot.drain()
+
+        from kiro_crew.dashboard.chat import (
+            _rehydrate_slot_from_history,
+            _save_slot_to_history,
+        )
+
+        _save_slot_to_history(state, slot)  # trusted line on disk
+        slot.append("user", "closing")
+        slot.drain()
+        _save_slot_to_history(state, slot, closed=True)  # close save omits trust keys
+
+        meta = json.loads(
+            (tmp_path / "dashboard_closedtrust.jsonl").read_text(encoding="utf-8").split("\n")[0]
+        )
+        assert "trust" not in meta
+        assert "trust_sig" not in meta
+
+        state2 = _make_state(tmp_path)
+        restored = _rehydrate_slot_from_history(state2, "closedtrust")
+        # closed sessions are skipped by rehydrate; if surfaced, trust is cleared.
+        assert restored is None or restored._trust is False

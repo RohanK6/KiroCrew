@@ -184,6 +184,18 @@ SLOT_OWNED_META_KEYS: frozenset[str] = frozenset(
         "forked_from",
         "linked_session_key",
         "tab_id",
+        # Per-session auto-approve trust (dashboard/trust_sig.py). Owned so
+        # "absence means cleared" applies: a save that omits them — because the
+        # user revoked trust (mode:normal -> flags False) or CLOSED the tab
+        # (write is gated on `not closed`) — must ERASE the prior signed grant,
+        # not let carry_unowned_metadata resurrect it. Without ownership a
+        # once-trusted session's still-valid signature is copied forward and
+        # re-verifies on restart, silently restoring a revoked/closed grant.
+        "trust",
+        "trust_reads",
+        "trusted_patterns",
+        "trust_sig",
+        "trust_at",
     }
 )
 

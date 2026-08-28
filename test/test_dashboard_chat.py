@@ -3219,7 +3219,10 @@ class TestHistorySaveOnClose:
         assert meta.get("mode") == "orchestrator"
 
     def test_close_does_not_persist_trust(self, tmp_path, monkeypatch):
-        """Trust flags are ephemeral — not written to session metadata."""
+        """A CLOSE is a deliberate teardown, so it does NOT write trust — a
+        session reopened from History re-prompts. (A normal save DOES persist
+        trust so it survives a gateway restart; see
+        test_normal_save_persists_trust.)"""
         from kiro_crew.dashboard.chat import _save_slot_to_history
 
         monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
@@ -3233,6 +3236,35 @@ class TestHistorySaveOnClose:
         meta = state.conversation_log._read_metadata("dashboard:t1")
         assert meta.get("trust") is None
         assert meta.get("trust_reads") is None
+
+    def test_normal_save_persists_trust(self, tmp_path, monkeypatch):
+        """A normal (non-close) save persists the session-scoped grant so it
+        survives a gateway restart — the fix for re-trusting every conversation
+        after `kirocrew restart`. The grant is HMAC-signed so a restore can
+        distinguish it from an agent-forged line."""
+        from unittest.mock import patch
+
+        from kiro_crew.dashboard import trust_sig
+        from kiro_crew.dashboard.chat import _save_slot_to_history
+
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path)
+        (tmp_path / "sel_hmac.key").write_bytes(b"\x04" * 32)
+        with (
+            patch.object(trust_sig, "sel_hmac_key_path", return_value=tmp_path / "sel_hmac.key"),
+            patch.object(trust_sig, "_sel_hmac_key_bytes", return_value=None),
+        ):
+            state = _make_state(tmp_path)
+            slot = state.get_or_create_slot("t2")
+            slot._trust = True
+            slot._trust_reads = True  # ad-hoc — must not persist
+            slot.append("user", "hi")
+            slot.drain()
+            _save_slot_to_history(state, slot)
+            meta = state.conversation_log._read_metadata("dashboard:t2")
+            assert meta.get("trust") is True
+            assert len(meta.get("trust_sig", "")) == 64
+            # Ad-hoc per-prompt approval is not persisted.
+            assert "trust_reads" not in meta
 
 
 # ── Resume deduplication ──

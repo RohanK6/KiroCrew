@@ -37,6 +37,7 @@ from kiro_crew.dashboard.state import (
     durable_row_count,
     row_mid,
 )
+from kiro_crew.dashboard.trust_sig import sign_trust, verify_trust
 from kiro_crew.effort import EFFORT_LEVELS, EFFORT_VALUES
 from kiro_crew.history import (
     SLOT_OWNED_META_KEYS,
@@ -102,6 +103,58 @@ def _rehydrate_title_refresh_mark(stored: object) -> int:
     if isinstance(stored, int) and not isinstance(stored, bool) and stored > 0:
         return stored
     return 0
+
+
+def _rehydrate_slot_trust(slot: _ChatSlot, metadata: Mapping[str, object]) -> None:
+    """Restore a slot's explicit session-wide auto-approve grant from metadata.
+
+    Only the deliberate "Trust this session" grant (``_trust`` — set by the
+    api_chat_mode ``mode:trust`` toggle or the card "Trust this session" button,
+    both of which flip the slot's approval policy to auto) is persisted and
+    restored. It was previously in-memory only, so a gateway restart silently
+    revoked it and the user had to re-toggle trust on every restored
+    conversation (#6379). The grant keys to the same session it was made in —
+    the meta line IS that session's record — while a fork/restore into a NEW
+    session key never carries it, because that path writes a fresh meta line the
+    user never trusted.
+
+    ``_trust_reads`` and ``_trusted_patterns`` are AD-HOC per-prompt approvals
+    (approve read-only / trust one command, on a single tool-call card). They
+    are never persisted, so they always restore cleared and re-prompt after a
+    restart — the safe default, and the behavior the review pipeline requires
+    (ad-hoc trust must not silently survive process shutdown).
+
+    AUTHENTICATED + BOUNDED restore. ``dashboard_*.jsonl`` is agent-writable, so
+    the grant is honored only when its ``trust_sig`` HMAC (see
+    ``trust_sig.sign_trust``) verifies against this session's history key AND
+    the signed ``trust_at`` is within the freshness window — otherwise an agent
+    that got a single arbitrary write approved could write a well-formed
+    ``"trust": true`` into its own line and self-escalate to durable blanket
+    trust on the next restart. Every failure mode restores NO trust (fail-closed):
+    a missing/bad signature, an expired or future-dated grant, or an
+    absent/short SEL trust root in this process.
+
+    The session-level approval policy is NOT set here — it is re-derived from
+    ``slot._trust`` when the session's next turn starts (see ``chat_handlers``
+    policy resolution), so restoring the slot flag is sufficient and avoids
+    resurrecting a session object at restore time.
+    """
+    # Restore ONLY the explicit session-wide trust grant. ``_trust_reads`` and
+    # ``_trusted_patterns`` are ad-hoc per-prompt approvals that are never
+    # persisted (see _save_slot_to_history), so they always start cleared and
+    # re-prompt after a restart — the safe default.
+    trust = metadata.get("trust") is True
+    if trust and verify_trust(
+        slot_history_key(slot),
+        trust=True,
+        signature=metadata.get("trust_sig"),
+        issued_at=metadata.get("trust_at"),
+    ):
+        slot._trust = True
+    else:
+        slot._trust = False
+    slot._trust_reads = False
+    slot._trusted_patterns = set()
 
 
 def _rehydrate_slot_title(
@@ -980,6 +1033,11 @@ def _rehydrate_slot_from_history(
             # Skipped, the slot would answer from a dashboard-only session and the
             # channel thread would stop seeing its replies.
             slot.linked_session_key = str(meta["linked_session_key"])
+        # AFTER linked_session_key: the trust signature is bound to the session's
+        # history key, which for a channel-origin slot derives from
+        # linked_session_key. Verifying before the rebind above would compute the
+        # dashboard-only key and reject a genuine grant (fail-closed no-op).
+        _rehydrate_slot_trust(slot, meta)
         # Restore the persisted tab_id so cross-restart fork chaining survives.
         # get_or_create_slot (called by our caller) assigns a fresh random uuid to
         # slot._tab_id; if we don't overwrite it here, the next _flush_dirty_slots
@@ -1449,6 +1507,10 @@ def _apply_recent_session(
         real_key = state.sessions.channel_key_for_stem(key)
         if real_key:
             slot.linked_session_key = real_key
+    # AFTER linked_session_key (both branches): trust verification binds to the
+    # session's history key, which for a channel-origin slot derives from
+    # linked_session_key — verifying earlier rejects a genuine grant.
+    _rehydrate_slot_trust(slot, meta)
     tab_id = meta.get("tab_id")
     if not tab_id:
         tab_id = uuid.uuid4().hex[:12]
@@ -2562,6 +2624,48 @@ def _save_slot_to_history(
                 # makes that whole class of omission harmless — same reason
                 # rotation_generation is carried forward above.
                 meta_line["channel_folder_filed"] = True
+            # Per-session auto-approve trust — persisted so a "trust this
+            # session" / "trust read-only bash" grant, and the per-command
+            # fnmatch grants, survive a gateway restart instead of forcing the
+            # user to re-approve every restored conversation. The grant is keyed
+            # to this session (this meta line IS the session's record); a
+            # fork/restore into a new session key writes its own line and never
+            # Persist ONLY the explicit session-wide "Trust this session" grant
+            # (``_trust``) — the deliberate mode toggle (api_chat_mode mode:trust)
+            # or the card "Trust this session" button, both of which set the
+            # slot's approval policy to auto. This is the grant #6379 is about
+            # (a restart should not force re-toggling trust on every chat).
+            #
+            # ``_trust_reads`` and ``_trusted_patterns`` are DELIBERATELY NOT
+            # persisted: both are reachable as AD-HOC, in-the-moment approvals on
+            # an individual tool-call card ("approve read-only for this session",
+            # "trust this command") — a transient reaction to one prompt, not a
+            # durable policy. Ad-hoc approvals re-prompt after a restart, which is
+            # the safe default the user expects (addresses the review finding
+            # that ad-hoc trust must not silently survive process shutdown).
+            #
+            # NOT written on an explicit CLOSE: closing is a deliberate teardown,
+            # so reopening from History is a fresh engagement that must
+            # re-prompt — fail-closed.
+            #
+            # AUTHENTICATED: dashboard_*.jsonl is agent-writable (not a
+            # sensitive-path root), so a bare `trust: true` would be a grant the
+            # agent could write for itself — one approved arbitrary write would
+            # self-escalate into durable blanket trust across a restart. The
+            # grant is HMAC-signed (``trust_sig``) with a subkey derived from the
+            # agent-unreadable SEL trust root and bound to this session's history
+            # key; rehydrate restores trust ONLY when the signature verifies.
+            # Keys are omitted when untrusted OR unsignable, so such a session's
+            # line stays clean and restores to no trust.
+            if not closed and slot._trust:
+                _signed = sign_trust(history_key, trust=True)
+                if _signed is not None:
+                    _trust_sig, _trust_at = _signed
+                    meta_line["trust"] = True
+                    meta_line["trust_sig"] = _trust_sig
+                    # issued_at is inside the MAC and re-checked on restore to
+                    # bound the grant's lifetime; persist it alongside the sig.
+                    meta_line["trust_at"] = _trust_at
             if slot._app:
                 meta_line["app"] = slot._app
             # Slot ORIGIN (user / app / cron) must round-trip with ``app``:
