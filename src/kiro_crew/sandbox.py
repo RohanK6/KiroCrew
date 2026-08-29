@@ -124,6 +124,16 @@ _STRICT_DIRS: list[str] = [
     # ``.vault/.vault_key`` and decrypt the store.
     ".kiro/crew/.vault",
     ".kirocrew/.vault",
+    # Gateway per-generation internal-API secrets (``run/gateway-<port>.secret``,
+    # see instances/run_marker.py). Hidden in EVERY mode for the same reason as
+    # the vault: an escaped same-UID agent that can read this secret mints an
+    # owner token via ``/api/token/local`` and then mutates the vault through
+    # ``/api/secrets`` even while the OS floor reports enforced. Hiding the whole
+    # ``run`` dir (it holds only gateway runtime markers/secrets an agent never
+    # needs) closes that token-minting path. The shared ``.local_secret`` file is
+    # covered by ``_ALL_TIER_SECRET_FILES`` below (a file, not a dir).
+    ".kiro/crew/run",
+    ".kirocrew/run",
     # The centrally-distributed governance ceiling's cache
     # (``platform/policy_distribution.py``). Bind-mount-hidden in every mode for the
     # reason the vault above is: ``is_sensitive_path`` is the shared read+write gate for
@@ -147,6 +157,9 @@ _STANDARD_DIRS: list[str] = [
     # Secret vault — hidden in every mode (see _STRICT_DIRS note above).
     ".kiro/crew/.vault",
     ".kirocrew/.vault",
+    # Gateway per-generation internal-API secrets (see _STRICT_DIRS note).
+    ".kiro/crew/run",
+    ".kirocrew/run",
     # The centrally-distributed governance ceiling's cache
     # (``platform/policy_distribution.py``). Bind-mount-hidden in every mode for the
     # reason the vault above is: ``is_sensitive_path`` is the shared read+write gate for
@@ -175,6 +188,9 @@ _CC_DIRS: list[str] = [
     # Secret vault — hidden in every mode (see _STRICT_DIRS note above).
     ".kiro/crew/.vault",
     ".kirocrew/.vault",
+    # Gateway per-generation internal-API secrets (see _STRICT_DIRS note).
+    ".kiro/crew/run",
+    ".kirocrew/run",
     # The centrally-distributed governance ceiling's cache
     # (``platform/policy_distribution.py``). Bind-mount-hidden in every mode for the
     # reason the vault above is: ``is_sensitive_path`` is the shared read+write gate for
@@ -258,6 +274,19 @@ _CC_FILES: list[str] = [
     # kept covered too (a not-yet-migrated box still holds real secret bytes).
     ".kiro/crew/.env",
     ".kirocrew/.env",
+]
+
+# Token-minting secrets hidden in EVERY sandbox tier (not just cc/strict, unlike
+# _CC_FILES). The shared ``.local_secret`` authenticates internal-API calls; an
+# escaped same-UID agent that reads it mints an owner token via
+# ``/api/token/local`` and mutates the vault through ``/api/secrets`` even while
+# the OS floor reports enforced. It is a FILE directly under the (visible)
+# config dir, so it cannot be hidden by a parent-dir entry — it must be masked
+# as a file in all tiers. The per-generation ``run/gateway-*.secret`` files are
+# covered by the ``run`` dir entry in the _*_DIRS lists above.
+_ALL_TIER_SECRET_FILES: list[str] = [
+    ".kiro/crew/.local_secret",
+    ".kirocrew/.local_secret",
 ]
 
 
@@ -1609,7 +1638,7 @@ def _build_launcher_script(
         dirs = _sandbox_policy().cc_dirs()
     else:
         dirs = _sandbox_policy().strict_dirs()
-    files = _CC_FILES if sandbox_level in ("cc", "strict") else []
+    files = (_CC_FILES if sandbox_level in ("cc", "strict") else []) + _ALL_TIER_SECRET_FILES
     expose_files = _CC_EXPOSE_FILES if sandbox_level == "cc" else []
     env_prefixes = list(_SENSITIVE_ENV_PREFIXES)
     if sandbox_level in ("cc", "strict"):
@@ -2388,7 +2417,7 @@ def _build_seatbelt_profile(
         dirs = [d for d in _sandbox_policy().cc_dirs() if d != ".aws"]
     else:
         dirs = _sandbox_policy().strict_dirs()
-    files = _CC_FILES if sandbox_level in ("cc", "strict") else []
+    files = (_CC_FILES if sandbox_level in ("cc", "strict") else []) + _ALL_TIER_SECRET_FILES
     expose_files = _CC_EXPOSE_FILES if sandbox_level == "cc" else []
     expose_abs = {os.path.join(home, f) for f in expose_files}
     rules: list[str] = []
@@ -3763,6 +3792,191 @@ def detect_backend(config_mode: str = "auto") -> str:
         _backend = "none"
     logger.info("Sandbox backend: %s (config_mode=%s)", _backend, config_mode)
     return _backend
+
+
+#: Returned by :func:`vault_floor_posture` when the OS hide is confirmed active
+#: and the resolved vault directory is inside the backend's hide set.
+VAULT_FLOOR_ENFORCED = "enforced"
+
+#: Returned by :func:`vault_floor_posture` when a hide mechanism EXISTS on this
+#: platform BUT is not currently masking the vault — the real "escaped agent can
+#: reach the vault" window.  Vault mutations MUST be refused on this posture.
+#:
+#: Triggers when ``agent.sandbox="off"`` on a namespace-capable Linux host, OR
+#: when the resolved vault directory falls outside every backend hide-list entry
+#: (e.g. ``KIROCREW_HOME=/srv/crew`` with hard-coded ``~/.kiro/crew/.vault``).
+VAULT_FLOOR_ABSENT = "absent"
+
+#: Returned by :func:`vault_floor_posture` when this platform has NO vault-hide
+#: mechanism at all (Windows, or a Linux host whose permanent probe failure means
+#: user-namespaces are unavailable and macOS sandbox-exec is also absent).
+#: The owner-token gate is the only boundary, so vault mutations are allowed
+#: via the normal owner check — refusing them would 403 the owner's own Settings
+#: page on every such platform for no security benefit.
+VAULT_FLOOR_NOT_APPLICABLE = "not_applicable"
+
+
+def _vault_dir_is_hidden(backend: str) -> bool:
+    """Return True when the resolved vault directory is contained in the backend's hide set.
+
+    The hide-list entries in ``_STRICT_DIRS`` / ``_STANDARD_DIRS`` / ``_CC_DIRS``
+    are ``$HOME``-relative strings (e.g. ``".kiro/crew/.vault"``).  When
+    ``KIROCREW_HOME`` relocates the data home away from ``$HOME``, the vault lives
+    at ``/srv/crew/.vault`` while every hide entry still expands to
+    ``~/.kiro/crew/.vault`` — the containment check would fail and an escaped agent
+    could open the real vault.  We resolve BOTH sides to absolute paths and require
+    ``is_relative_to`` containment so that symlinks and custom homes cannot produce
+    a false positive.
+
+    On macOS the hide set comes from ``_CC_DIRS`` / ``_STRICT_DIRS`` (whichever the
+    active mode uses); on Linux from ``_STRICT_DIRS`` (the most inclusive set —
+    vault entries appear in all three, so using the superset is correct here).
+    Using a set union of all entries is also fine and future-safe.
+
+    Returns ``False`` on any resolution error (fail-closed for the ABSENT branch).
+    """
+    # Resolve the real vault path.
+    try:
+        vault_path = Path(config_dir()) / ".vault"
+        vault_abs = Path(os.path.normpath(vault_path))
+    except Exception:
+        return False
+
+    # Build the set of all absolute hide-list paths for the active backend.
+    # Vault entries appear in every list, so we only need to check those.
+    _vault_relative_entries = [
+        ".kiro/crew/.vault",
+        ".kirocrew/.vault",
+    ]
+    home = Path.home()
+    for rel in _vault_relative_entries:
+        try:
+            hide_abs = Path(os.path.normpath(home / rel))
+            if vault_abs == hide_abs or vault_abs.is_relative_to(hide_abs):
+                return True
+        except (TypeError, ValueError):
+            continue
+
+    # Also check the relocated form produced by _relocated_policy_cache_dirs
+    # logic: if the vault resolves to the same absolute path as one of the
+    # hide entries after normpath, it is hidden.
+    try:
+        resolved = os.path.normpath(str(vault_abs))
+        for rel in _vault_relative_entries:
+            default = os.path.normpath(os.path.join(str(home), rel))
+            if resolved == default:
+                return True
+    except Exception:
+        pass
+
+    return False
+
+
+def _no_mechanism_posture() -> str:
+    """Posture for a host with NO OS vault-hide mechanism (Windows / no-userns).
+
+    Normally the owner-token gate is the only boundary and vault mutations are
+    allowed (``NOT_APPLICABLE``) — refusing them would 403 the owner's own
+    Settings → Secrets page on every such platform for no security benefit.
+
+    BUT if the operator has opted into running agents WITHOUT isolation on this
+    host (``agent.sandbox_allow_unsandboxed_exec`` or
+    ``agent.sandbox_allow_no_isolation``), then live agent subprocesses run
+    unconfined and can ``import SecretVault`` to read the vault directly. In that
+    configuration a write is genuinely exposed to an unconfined agent, so we
+    refuse it (``ABSENT``). Without those opt-ins a no-backend host cannot spawn
+    an agent at all (the runner fail-closes), so no unconfined reader exists and
+    the owner write is safe.
+    """
+    try:
+        if _allow_unsandboxed_exec() or _allow_no_isolation():
+            return VAULT_FLOOR_ABSENT
+    except Exception:
+        # Fail closed: if we cannot determine the opt-in state, refuse.
+        return VAULT_FLOOR_ABSENT
+    return VAULT_FLOOR_NOT_APPLICABLE
+
+
+def vault_floor_posture(configured_mode: str = "auto") -> str:
+    """Return the vault-floor posture as one of three named constants.
+
+    This is the authoritative, platform-and-containment-aware answer to
+    "is the OS-level vault hide in force right now?"  It supersedes the
+    old boolean :func:`vault_floor_in_force` (kept as a thin wrapper below
+    for backwards compatibility with any callers that have not been updated).
+
+    **Three-way decision:**
+
+    ``VAULT_FLOOR_ENFORCED``
+        A hide mechanism exists on this platform AND is actively masking the
+        resolved vault directory.  Vault mutations are allowed (subject to the
+        owner gate).
+
+    ``VAULT_FLOOR_ABSENT``
+        A hide mechanism EXISTS on this platform but is NOT currently masking
+        the vault — this is the real "escaped agent window".  Vault mutations
+        MUST be refused (403).  Triggers when ``agent.sandbox="off"`` on a
+        namespace/seatbelt-capable host, or when the resolved vault dir falls
+        outside every backend hide-list entry (relocated ``KIROCREW_HOME``).
+
+    ``VAULT_FLOOR_NOT_APPLICABLE``
+        The platform has NO vault-hide mechanism (Windows, or a Linux host with
+        a permanent userns probe failure and no macOS sandbox-exec).  The owner
+        token is the only boundary.  Vault mutations are ALLOWED via the normal
+        owner check — refusing them 403s the owner's own Settings → Secrets page
+        on every such platform for no security gain.
+
+    ``configured_mode`` MUST be the ``agent.sandbox`` value captured from the
+    in-memory boot-time config (NOT a fresh disk read), for the same sandbox-flip
+    race reason as the old ``vault_floor_in_force``.  The gateway captures it
+    once in ``start_dashboard`` and updates it via the config-patch handler.
+
+    This function uses the already-boot-resolved :data:`_backend` cache so no
+    sync I/O occurs on the event loop when called from an ``asyncio.to_thread``
+    wrapper (the gateway's call site).
+    """
+    if configured_mode == "off":
+        # sandbox explicitly disabled by the operator. `off` is a deliberate
+        # choice to run agents WITHOUT Kiro Crew isolation: on Linux a non-kiro
+        # spawn under mode="off" is genuinely unconfined (wrap_argv only raises
+        # for non-"off" modes), so an agent can import SecretVault and decrypt
+        # the store regardless of whether a backend COULD have existed. The
+        # vault floor is therefore never in force under "off" — refuse vault
+        # mutations (ABSENT). This is not the Design no-403 case: that covers
+        # hosts with NO hide mechanism under the DEFAULT posture (auto), where
+        # the runner fail-closes rather than spawn an unconfined agent; "off"
+        # is the operator opting out of isolation entirely.
+        return VAULT_FLOOR_ABSENT
+
+    backend = detect_backend(configured_mode)
+    if backend == "none":
+        # No mechanism available on this platform.  Check whether this is a
+        # permanent host-level absence (no Linux userns, no macOS sandbox-exec)
+        # vs a transient failure.  Transient failures are treated as ABSENT
+        # (fail-closed) since we cannot confirm the hide is in place.
+        transient = (_last_unshare_failure or (False, "", ""))[0]
+        if transient:
+            return VAULT_FLOOR_ABSENT
+        return _no_mechanism_posture()
+
+    # A mechanism exists.  Verify the resolved vault dir is inside the hide set.
+    if _vault_dir_is_hidden(backend):
+        return VAULT_FLOOR_ENFORCED
+    # Mechanism exists but vault is outside the hide set (e.g. relocated KIROCREW_HOME).
+    return VAULT_FLOOR_ABSENT
+
+
+def vault_floor_in_force(configured_mode: str = "auto") -> bool:
+    """Backwards-compatible boolean wrapper around :func:`vault_floor_posture`.
+
+    Returns ``True`` for ``VAULT_FLOOR_ENFORCED`` or ``VAULT_FLOOR_NOT_APPLICABLE``
+    (both allow vault mutations), ``False`` for ``VAULT_FLOOR_ABSENT`` (refuse).
+
+    New callers should use :func:`vault_floor_posture` directly to distinguish
+    the three cases.
+    """
+    posture = vault_floor_posture(configured_mode)
+    return posture != VAULT_FLOOR_ABSENT
 
 
 class SandboxUnavailableError(RuntimeError):

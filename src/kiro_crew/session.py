@@ -1241,9 +1241,20 @@ class SessionManager:
             cfg.agent.reasoning_effort,
         )
 
-    async def reload_provider_factory(self) -> None:
-        """Reload provider factory from current config (after provider switch)."""
-        cfg = KiroCrewConfig.load()
+    async def reload_provider_factory(self) -> int:
+        """Reload provider factory from current config (after provider switch).
+
+        Returns the number of stale sessions whose ``provider.shutdown()``
+        RAISED — i.e. runtimes that may still be alive under the OLD tier. A
+        caller tightening the sandbox floor (off->auto) MUST treat a non-zero
+        return as failure: a surviving unconfined runtime means the new tier is
+        persisted but not enforced. Zero means every prior session was torn down.
+        """
+        # KiroCrewConfig.load() is synchronous (reads + parses JSON from disk).
+        # Calling it directly on the event loop would block every other coroutine
+        # for the duration of the I/O.  Offload to a thread so the loop stays
+        # responsive during config reload (e.g. when agent.sandbox changes).
+        cfg = await asyncio.to_thread(KiroCrewConfig.load)
         stale: list[tuple[str, Any]] = []
         async with self._pool_fill_lock:
             async with self._lock:
@@ -1262,10 +1273,12 @@ class SessionManager:
                 stale = list(self._sessions.items())
                 self._sessions.clear()
         # Shut down old sessions outside locks to avoid blocking
+        _shutdown_failures = 0
         for key, sess in stale:
             try:
                 await sess.provider.shutdown()
             except Exception:
+                _shutdown_failures += 1
                 logger.debug(
                     "Failed to shut down session %s on provider switch", key, exc_info=True
                 )
@@ -1280,6 +1293,7 @@ class SessionManager:
             cfg.agent.provider,
             len(stale),
         )
+        return _shutdown_failures
 
     # ── Background Session ──
 

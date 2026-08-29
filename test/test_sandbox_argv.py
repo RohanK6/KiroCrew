@@ -243,6 +243,18 @@ class TestBuildSeatbeltProfile:
         for f in _CC_FILES:
             assert os.path.join(home, f) in profile
 
+    def test_token_minting_secrets_denied_in_every_tier(self):
+        """Gateway internal-API secrets that mint owner tokens must be hidden
+        from an escaped agent in EVERY tier — else the agent reads them, mints an
+        owner token and mutates the vault even while the floor is enforced (GPT
+        5.6 cli.py:690). ``.local_secret`` is a file in the visible config dir;
+        ``run/`` holds ``gateway-<port>.secret``."""
+        home = str(Path.home())
+        for level in ("strict", "standard", "cc"):
+            profile = _build_seatbelt_profile(level)
+            assert os.path.join(home, ".kiro/crew/run") in profile, level
+            assert os.path.join(home, ".kiro/crew/.local_secret") in profile, level
+
     def test_cc_mode_skips_aws_dir(self):
         """CC mode does NOT deny .aws as a directory (credential_process needs it)."""
         profile = _build_seatbelt_profile("cc")

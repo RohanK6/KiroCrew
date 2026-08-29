@@ -18,7 +18,7 @@ from urllib.parse import quote
 
 from aiohttp import web
 
-from kiro_crew import platform_compat, port_resolution
+from kiro_crew import platform_compat, port_resolution, sandbox
 from kiro_crew.apps.backend import start_enabled_app_backends
 from kiro_crew.apps.hooks_integration import (
     init_hooks_system,
@@ -3102,6 +3102,46 @@ async def start_dashboard(
     setup_knowledge_routes(app)
     setup_weixin_routes(app)
     setup_feedback_routes(app)
+    # Capture the boot-time vault floor posture ONCE, off the event loop (the
+    # probe may do sync config I/O + a sandbox-exec subprocess on macOS), before
+    # registering the secrets routes.  The handlers read app["vault_floor_posture"]
+    # on every request to decide whether vault mutations are permitted; by
+    # resolving it here — from the KiroCrewConfig that was loaded at gateway
+    # startup, NOT via a fresh disk read — we prevent a post-boot config edit
+    # from fooling the server-side authorization check into believing the OS hide
+    # is in force when it actually is not (the classic sandbox-flip race).
+    # detect_backend() uses its already-set _backend cache (populated by earlier
+    # spawns or a proactive probe) so this is also purely in-memory once warm.
+    #
+    # THREE-WAY posture is stored so the secrets handlers can distinguish
+    # VAULT_FLOOR_NOT_APPLICABLE (Windows/no-userns → allow via owner gate alone)
+    # from VAULT_FLOOR_ABSENT (mechanism exists but not masking vault → 403) from
+    # VAULT_FLOOR_ENFORCED (hiding confirmed → allow).  The old boolean collapsed
+    # NOT_APPLICABLE and ENFORCED into True, which is correct, but storing the
+    # string lets the config-patch update hook refresh it on a sandbox toggle
+    # without needing to keep the boot mode in a separate variable.
+
+    def _capture_vault_posture() -> str:
+        try:
+            boot_cfg = KiroCrewConfig.load()
+            boot_mode = str(getattr(boot_cfg.agent, "sandbox", "auto"))
+            return sandbox.vault_floor_posture(boot_mode)
+        except Exception:
+            # Fail closed: treat as ABSENT so vault mutations are refused.
+            return sandbox.VAULT_FLOOR_ABSENT
+
+    try:
+        # Bound the boot-path probe: an unresponsive data-home read or backend
+        # probe must not stall dashboard binding forever. On timeout we fail
+        # closed (ABSENT -> vault mutations refused) rather than hang startup.
+        _posture = await asyncio.wait_for(asyncio.to_thread(_capture_vault_posture), timeout=5.0)
+    except Exception:
+        # Covers asyncio.TimeoutError (bounded above) and any probe error.
+        _posture = sandbox.VAULT_FLOOR_ABSENT
+    app["vault_floor_posture"] = _posture
+    # Keep the legacy boolean key for any code that reads it directly (e.g.
+    # tests that pre-date the three-way split), derived from the posture string.
+    app["vault_floor_in_force"] = _posture != sandbox.VAULT_FLOOR_ABSENT
     setup_secrets_routes(app)
     setup_whatsapp_routes(app)
 
@@ -3323,7 +3363,6 @@ async def start_dashboard(
     _secret_path = data_home() / ".local_secret"
     _internal_secret = os.urandom(16).hex()
     app["local_secret"] = _internal_secret
-
     # Host canonicalization: converge loopback aliases (127.0.0.1 / localhost /
     # kirocrew.localhost) onto a single origin so the SPA's per-origin
     # localStorage (theme, zoom, layout, notifications, ...) is never split
@@ -4035,7 +4074,6 @@ async def start_api_server(
     _secret_path = data_home() / ".local_secret"
     _internal_secret = os.urandom(16).hex()
     app["local_secret"] = _internal_secret
-
     # SEL audit middleware — log mutating MCP tool calls
     _sel_methods = {"GET", "POST", "PUT", "PATCH", "DELETE"}
 

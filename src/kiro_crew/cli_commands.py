@@ -2855,6 +2855,48 @@ def _handle_secrets(args: argparse.Namespace) -> None:
         # operational condition (retry after the concurrent write settles, or
         # repair the vault entry), so surface it as a clean CLI error with a
         # nonzero exit — never an uncaught traceback.
+        #
+        # --apply MUTATES the vault. Gate it through the same floor check as
+        # `secrets set` / `secrets rm`: refuse when the OS sandbox mechanism
+        # exists but is not actively masking the vault (FLOOR_ABSENT). On
+        # platforms with no vault-hide mechanism at all (FLOOR_NOT_APPLICABLE:
+        # Windows, no-userns Linux) the owner-token gate is the only boundary
+        # and import --apply is allowed, matching the set/rm posture.
+        if args.apply:
+            try:
+                from kiro_crew import sandbox as _sb  # avoid circular import at module top
+
+                _configured_mode = _sb.configured_sandbox_mode()
+                _posture = _sb.vault_floor_posture(_configured_mode)
+                if _posture == _sb.VAULT_FLOOR_ABSENT:
+                    # SEL audit via the sel() already imported at the top of this module.
+                    sel().log_tool_invocation(
+                        session_key="cli",
+                        source="cli",
+                        tool_name="secrets_import_apply",
+                        outcome="denied",
+                        metadata={"reason": "vault_floor_not_in_force"},
+                    )
+                    print(
+                        "Error: secrets import --apply requires the OS sandbox floor to be "
+                        "in force. The sandbox mechanism exists on this host but is not "
+                        "currently masking the vault (agent.sandbox may be 'off', or the "
+                        "vault directory is outside the sandbox hide set). "
+                        "Set agent.sandbox='auto' or check KIROCREW_HOME.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+            except SystemExit:
+                raise
+            except Exception as exc:
+                # Fail closed on floor-check errors: if we cannot determine
+                # posture, refuse the apply.
+                print(
+                    f"Error: could not determine vault floor posture ({exc}); "
+                    "refusing secrets import --apply. Retry once the gateway is running.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
         try:
             report = migrate_env_secrets(dry_run=not args.apply)
         except MigrationConflictError as exc:

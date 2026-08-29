@@ -1650,6 +1650,36 @@ def _should_reconcile_launchd_launcher() -> bool:
     )
 
 
+def _ensure_vault_dir_exists() -> None:
+    """Eagerly create the encrypted-vault DIRECTORY before any agent is spawned.
+
+    The sandbox builds each agent's mount-namespace hide of ``.kiro/crew/.vault``
+    at spawn time, and a mount namespace can only mask a path that already
+    exists. ``SecretVault`` otherwise creates ``.vault`` lazily on the first
+    ``secrets set``, so an agent spawned BEFORE that first write would have a
+    namespace built without the directory present — and a later first-creation
+    by a human ``secrets set`` would leave that already-running agent able to
+    read ``.vault/.vault_key``. Creating the directory at boot, before
+    ``run_gateway`` spawns anything, closes that first-creation TOCTOU: every
+    agent namespace is built with the directory present and masked.
+
+    Only the directory is created. The key file is deliberately NOT touched —
+    ``SecretVault`` mints it under ``O_CREAT | O_EXCL`` with its own
+    ``restrict_to_owner`` lockdown; all the sandbox needs is a real path to
+    mask. The directory is created exactly as ``SecretVault._config_dir`` would
+    (``mkdir(parents=True, exist_ok=True)``), so pre-creating it is
+    byte-indistinguishable from the lazy path — only earlier. No-op when the
+    directory already exists.
+
+    **Fails CLOSED.** If the directory cannot be created the exception
+    propagates: the caller aborts gateway startup rather than binding the socket
+    and spawning agents into namespaces that could not mask the vault. A gateway
+    that cannot secure the vault directory must not run insecure.
+    """
+    vault_dir = config_dir() / ".vault"
+    vault_dir.mkdir(parents=True, exist_ok=True)
+
+
 async def _gateway(
     *,
     no_dashboard: bool = False,
@@ -1709,6 +1739,55 @@ async def _gateway(
         print(f"👻 Created default config: {config_path()}")
 
     cfg = KiroCrewConfig.load()
+
+    # Secure the encrypted-vault directory BEFORE run_gateway binds the socket
+    # or spawns any agent, closing the first-creation TOCTOU (see the helper).
+    #
+    # Bounded + off the event loop: the mkdir touches config_dir(), which may be
+    # a slow or unresponsive network-mounted data home. `asyncio.to_thread` keeps
+    # a blocking mkdir off the loop; `wait_for` bounds it so a wedged mount cannot
+    # hang boot indefinitely. Both failure modes FAIL CLOSED — the gateway must
+    # never bind the socket or spawn agents into namespaces that could not mask
+    # the vault.
+    try:
+        await asyncio.wait_for(asyncio.to_thread(_ensure_vault_dir_exists), timeout=5.0)
+    except asyncio.TimeoutError:
+        # Write the reason straight to stderr fd 2 and hard-exit IMMEDIATELY.
+        # A file-backed logging handler could itself block writing to the same
+        # stalled/unresponsive data-home mount that caused the timeout, so the
+        # `os._exit(1)` must not sit behind any handler that touches the mount.
+        # os.write to fd 2 is a direct syscall — it does not route through the
+        # logging handlers. The write is made NON-BLOCKING first: a full or
+        # stalled stderr pipe would otherwise block the os.write itself and the
+        # `os._exit(1)` would never be reached (startup hangs). With O_NONBLOCK a
+        # write to a full pipe raises EAGAIN (caught below) instead of blocking,
+        # so the hard exit is always reached — the diagnostic is best-effort, the
+        # bounded fail-closed exit is guaranteed.
+        try:
+            os.set_blocking(2, False)
+        except (OSError, ValueError):
+            pass
+        try:
+            os.write(
+                2,
+                (
+                    "👻 Gateway startup aborted: could not secure the secrets "
+                    "vault directory within 5s; refusing to start to avoid "
+                    "running with an unmasked vault. Check that the data home "
+                    "is writable and responsive, then start the gateway again.\n"
+                ).encode("utf-8", "replace"),
+            )
+        except (OSError, BlockingIOError):
+            pass
+        os._exit(1)
+    except OSError as exc:
+        raise SystemExit(
+            f"👻 Gateway startup aborted: could not secure the secrets vault "
+            f"directory at {config_dir() / '.vault'} ({exc}). The gateway will not "
+            f"bind while the vault is unprotected. Check that the data home is "
+            f"writable, then start the gateway again."
+        ) from exc
+
     await run_gateway(
         cfg,
         no_dashboard=no_dashboard,
@@ -1795,8 +1874,8 @@ async def _run_task(args: argparse.Namespace) -> None:
         await asyncio.to_thread(skills.sync_builtins)
     except Exception:
         logging.getLogger(__name__).warning(
-            "builtin-skill sync failed; continuing with the skills already "
-            "on disk", exc_info=True,
+            "builtin-skill sync failed; continuing with the skills already " "on disk",
+            exc_info=True,
         )
     consolidator = HistoryConsolidator(
         log=conv_log,

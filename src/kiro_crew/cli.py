@@ -29,22 +29,31 @@ import argparse
 import asyncio
 import atexit
 import faulthandler
+import getpass
+import http.client
 import importlib
 import importlib.machinery
+import json
 import logging
 import os
 import queue
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from pathlib import Path
 from typing import NoReturn
 
-from kiro_crew import __version__, cli_help, platform_compat
+from kiro_crew import __version__, cli_help
+from kiro_crew import loopback_http as _loopback_http
+from kiro_crew import platform_compat
 from kiro_crew.apps import builtins as _builtins_pkg
 from kiro_crew.apps.builtins import BUILTIN_NAMES as _BUILTIN_NAMES
 from kiro_crew.config import KiroCrewConfig, config_dir, ensure_data_home
+from kiro_crew.config import loader as _loader
 from kiro_crew.config.loader import (
     DASHBOARD_PORT,
     build_provider_factory,
@@ -609,6 +618,362 @@ def _knowledge(args) -> None:
     for r in results:
         print(f"  {verb}: {r['loser']}  ({r['items_deleted']} chunks)")
         print(f"      keep: {r['winner']}   [{r['reason']}]")
+
+
+#: Actions that MUTATE the vault. These are routed through the gateway so that
+#: the write is an atomic gateway operation with no CLI-side TOCTOU.
+#: ``list`` reads directly (no authorization needed beyond owner gate in gateway).
+_SECRETS_MUTATING_ACTIONS = ("set", "rm")
+
+
+def _secrets_denied(reason: str, message: str) -> NoReturn:
+    """Audit and refuse a secrets request. Never returns.
+
+    ``reason`` is a short machine-readable token (not prose) so the SEL row is
+    greppable. No secret name or value is ever recorded on the deny path — the
+    caller was not authorized to name one.
+    """
+    sel().log_tool_invocation(
+        session_key="cli",
+        source="cli",
+        tool_name="secrets",
+        outcome="denied",
+        metadata={"reason": reason},
+    )
+    print(message, file=sys.stderr)
+    sys.exit(1)
+
+
+def _escape_control_chars(text: str) -> str:
+    """Render C0/C1 control characters in *text* as visible ``\\xNN`` escapes.
+
+    Secret names are operator-settable and surface in ``secrets list``. A name
+    containing raw ESC/CSI/OSC/BEL bytes could rewrite the terminal, spoof
+    output, or set the window title when printed. This maps every control byte
+    to an inert visible form so listing names cannot become a terminal-control
+    injection vector. Printable characters (including ordinary Unicode) pass
+    through unchanged.
+
+    Covers C0 (``\\x00``–``\\x1f``), DEL (``\\x7f``), and C1 (``\\x80``–``\\x9f``)
+    — the last matters because a lone ``\\x9b`` is a single-byte CSI introducer.
+    """
+    return "".join(
+        ch if not (ord(ch) < 0x20 or 0x7F <= ord(ch) <= 0x9F) else f"\\x{ord(ch):02x}"
+        for ch in text
+    )
+
+
+def _secrets_gateway_write(action: str, *, name: str, value: str = "") -> None:
+    """Route a vault mutation through the running gateway.
+
+    Authorization is the owner gate in the gateway handler, so both the CLI and
+    the dashboard Settings page share the SAME gate and SAME atomic
+    check-then-write.  The CLI calls POST /api/secrets (set) or
+    DELETE /api/secrets/{name} (rm) over loopback, authenticated with a
+    short-lived local token minted via ``/api/token/local`` (same mechanism as
+    ``kirocrew token``).
+
+    Fails CLOSED: an unreachable gateway, a missing secret file, a token-mint
+    failure, an HTTP error, or an owner-refused 403 all print a clear message
+    and exit with code 1.
+    """
+    _loopback = "127.0.0.1"
+    # Deferred import (issue #3504): dashboard.urls executes dashboard/__init__,
+    # which must stay off cli.py's module-scope import path so non-gateway CLI
+    # commands never load the dashboard package. read_local_secret / loopback are
+    # module-scope (stdlib-only / config leaf) so they can be patched by tests.
+    # Use importlib.import_module (not a bare ``from ... import``) to match the
+    # repo's #3504 lazy-load convention for dashboard-package access.
+    parse_dashboard_url = importlib.import_module("kiro_crew.dashboard.urls").parse_dashboard_url
+
+    port = parse_dashboard_url(KiroCrewConfig.load().dashboard.url)[1]
+    secret = _loader.read_local_secret(port)
+    if not secret:
+        print(
+            "Error: vault writes require a running gateway. Start it with: kirocrew gateway",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Mint a short-lived local token (same mechanism as `kirocrew token`).
+    token_url = f"http://{_loopback}:{port}/api/token/local?ttl=30s"
+    tok_req = urllib.request.Request(token_url, headers={"X-Local-Secret": secret})
+    try:
+        with _loopback_http.loopback_urlopen(
+            tok_req, timeout=5
+        ) as resp:  # nosemgrep: dynamic-urllib-use-detected -- hardcoded http:// loopback (127.0.0.1) + fixed internal path; only the int port varies; never agent-controlled  # noqa: E501
+            tok_body = json.loads(resp.read())
+            bearer = tok_body.get("token", "")
+    except (urllib.error.URLError, OSError) as exc:
+        print(
+            f"Error: vault writes require a running gateway "
+            f"(could not connect: {exc}). Start it with: kirocrew gateway",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except Exception:
+        bearer = ""
+    if not bearer:
+        print(
+            "Error: could not mint a local token — is the gateway running?",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    try:
+        # Authenticate via the ?token= query param: token_auth_middleware
+        # extracts the session token ONLY from the query string or the
+        # mc_token_<port> cookie — it does not read Authorization: Bearer — so
+        # a bearer-only request is rejected as unauthenticated. This matches the
+        # convention every other local-token caller uses.
+        _tok_q = urllib.parse.quote(bearer, safe="")
+        if action == "set":
+            payload = json.dumps({"name": name, "value": value}).encode()
+            req = urllib.request.Request(
+                f"http://{_loopback}:{port}/api/secrets?token={_tok_q}",
+                data=payload,
+                method="POST",
+                headers={
+                    "Content-Type": "application/json",
+                },
+            )
+        else:  # rm
+            encoded = urllib.parse.quote(name, safe="")
+            req = urllib.request.Request(
+                f"http://{_loopback}:{port}/api/secrets/{encoded}?token={_tok_q}",
+                method="DELETE",
+            )
+        with _loopback_http.loopback_urlopen(
+            req, timeout=5
+        ) as resp:  # nosemgrep: dynamic-urllib-use-detected -- hardcoded http:// loopback (127.0.0.1) + fixed internal path; only the int port varies; never agent-controlled  # noqa: E501
+            body = json.loads(resp.read())
+            if not body.get("ok"):
+                err = body.get("error", "unknown error")
+                code = body.get("code", "")
+                reason = body.get("reason", "")
+                msg = f"Error: vault write failed — {err}"
+                if code:
+                    msg += f" ({code})"
+                if reason:
+                    msg += f"; reason: {reason}"
+                print(msg, file=sys.stderr)
+                sys.exit(1)
+    except urllib.error.HTTPError as exc:
+        # 403 with a JSON body means floor refused — surface the reason token.
+        try:
+            body = json.loads(exc.read())
+            err = body.get("error", "vault write refused")
+            code = body.get("code", "")
+            reason = body.get("reason", "")
+            msg = f"Error: {err}"
+            if reason:
+                msg += f" (reason: {reason})"
+            elif code:
+                msg += f" ({code})"
+        except Exception:
+            msg = f"Error: gateway returned HTTP {exc.code}"
+        print(msg, file=sys.stderr)
+        sys.exit(1)
+    except (urllib.error.URLError, OSError) as exc:
+        print(
+            f"Error: vault writes require a running gateway "
+            f"(could not connect: {exc}). Start it with: kirocrew gateway",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except (ValueError, http.client.IncompleteRead) as exc:
+        # A gateway restart mid-response can truncate the success body so the
+        # read or json.loads() raises (JSONDecodeError subclasses ValueError).
+        # Exit cleanly rather than escaping as a traceback; the write's outcome
+        # is unknown, so treat it as a failure.
+        print(
+            f"Error: gateway returned an unreadable response (write outcome unknown: "
+            f"{exc}). Re-run once the gateway is stable.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def _secrets(args) -> None:
+    """``kirocrew secrets list|set|rm`` — manage the encrypted vault."""
+    action = getattr(args, "secrets_action", None)
+
+    # Refuse the vault CLI from an agent session, FAIL-CLOSED. The decision
+    # lives in session_pid.agent_session_blocks_vault_mutation(), which blocks
+    # when: (1) KIROCREW_SPAWNED is in this process's env; (2) a marked ancestor
+    # is found by the parent-PID walk (catches a child that scrubbed its OWN env
+    # but cannot rewrite an already-running ancestor's environ); OR (3) ancestry
+    # inspection is unsupported on this platform (macOS/Windows) — where a
+    # stripped env marker leaves us unable to prove a human session, so we refuse
+    # rather than let a mutation read .local_secret and mint an owner token, or a
+    # `list` disclose the owner-only vault's secret NAMES.
+    #
+    # ALL verbs are gated, not just mutations: `list` reads the encrypted vault
+    # via SecretVault.list_names(), so even name-only disclosure to an agent
+    # session leaks the identifiers of owner-only secrets. The verbs remain fully
+    # available to a HUMAN in their own terminal; a human on macOS/Windows
+    # manages secrets through the dashboard Settings → Secrets owner path, which
+    # this does not touch.
+    if (
+        action
+        in (
+            "list",
+            "set",
+            "rm",
+            "import",
+        )
+        and importlib.import_module("kiro_crew.session_pid").agent_session_blocks_vault_mutation()
+    ):
+        _secrets_denied(
+            "agent_env_marker",
+            "Error: `kirocrew secrets` is not available to an agent session. "
+            "Run it from your own terminal.",
+        )
+
+    sel().log_tool_invocation(
+        session_key="cli",
+        source="cli",
+        tool_name="secrets",
+        outcome="allowed",
+        metadata={"action": action},
+    )
+
+    # Resolved lazily, NOT at module scope: `kiro_crew.secrets.vault` imports
+    # `cryptography.hazmat.primitives.ciphers.aead.AESGCM` at ITS module scope,
+    # so a top-level import here would pull the crypto stack into every gateway
+    # launch (cli.py is on the boot path) for a subcommand almost no launch
+    # uses. `importlib.import_module` is a call, not an `import` statement, so
+    # the top-level-imports lint is satisfied either way.
+    SecretVault = importlib.import_module("kiro_crew.secrets").SecretVault
+    vault = SecretVault(config_dir())
+
+    if action == "list":
+        try:
+            names = vault.list_names()
+        except (OSError, ValueError, TypeError, AttributeError) as exc:
+            # A restored/corrupt `secrets.enc` makes `_load_entries()` raise
+            # (JSON/`ValueError` or `OSError`). Surface a clean CLI error with a
+            # nonzero exit rather than an uncaught traceback — `list` is
+            # read-only, so the store is simply unreadable and must be repaired.
+            print(
+                f"error: could not read the secrets vault "
+                f"({exc.__class__.__name__}: {exc}); repair or remove the vault "
+                f"store.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if not names:
+            print("No secrets stored.")
+            return
+        for name in sorted(names):
+            # Secret names are operator-settable (including via the dashboard),
+            # so a name could carry ANSI/OSC/CSI terminal-control sequences that
+            # rewrite the terminal, spoof output, or set the window title. Escape
+            # every C0/C1 control byte (ESC, CSI, OSC, BEL, ...) to a visible
+            # backslash form before printing so `secrets list` cannot be a
+            # terminal-injection vector.
+            print(_escape_control_chars(name))
+
+    elif action == "set":
+        name = args.name
+        if getattr(args, "stdin", False):
+            # A pipe carrying non-UTF-8 bytes makes the text-mode `sys.stdin`
+            # raise UnicodeDecodeError at read time — before the encodability
+            # guard below — which would dump a traceback. Catch it here and
+            # emit the same clean invalid-UTF-8 error with a non-zero exit.
+            try:
+                value = sys.stdin.read()
+            except UnicodeDecodeError:
+                print("error: secret value is not valid UTF-8", file=sys.stderr)
+                sys.exit(1)
+            # Preserve the piped bytes EXACTLY — do not strip a trailing
+            # newline. A secret can legitimately end in `\n`/`\r\n`, and silently
+            # removing it would store a credential that differs from its input.
+            # Callers that do not want a shell-added terminator pipe with
+            # `printf %s` or `echo -n` rather than `echo`.
+            if not value:
+                print("Error: no value received on stdin.", file=sys.stderr)
+                sys.exit(1)
+        elif sys.stdin.isatty():
+            # Escape the name for display: it is operator-settable (incl. via
+            # the dashboard) and could carry ANSI/OSC/CSI control sequences that
+            # rewrite the terminal when echoed in the prompt.
+            try:
+                value = getpass.getpass(f"Value for {_escape_control_chars(name)}: ")
+            except (EOFError, KeyboardInterrupt):
+                # Ctrl-D (EOF) or Ctrl-C at the prompt: abort cleanly with a
+                # nonzero exit instead of dumping an uncaught traceback. Nothing
+                # is stored.
+                print("\nError: aborted, secret not stored.", file=sys.stderr)
+                sys.exit(1)
+            if not value:
+                print("Error: empty value, secret not stored.", file=sys.stderr)
+                sys.exit(1)
+        else:
+            print(
+                "Error: not a TTY and --stdin not passed. Use --stdin to read from a pipe.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        # Both stdin and the prompt hand us a `str`, but a value piped from a
+        # non-UTF-8 source arrives carrying surrogate escapes (or lone
+        # surrogates), which survive here and only blow up later inside
+        # `vault.set` at `value.encode("utf-8")` — an uncaught UnicodeEncodeError
+        # that dumps a traceback and stores nothing. The NAME has the same
+        # hazard: a POSIX argv byte that isn't valid UTF-8 reaches the vault as
+        # a surrogate-bearing `str` and crashes at AAD/key encoding. Validate
+        # BOTH at this boundary so every path fails with a clean CLI error and
+        # nothing is written.
+        try:
+            name.encode("utf-8")
+        except UnicodeError:
+            print("error: secret name is not valid UTF-8", file=sys.stderr)
+            sys.exit(1)
+        try:
+            value.encode("utf-8")
+        except UnicodeError:
+            print("error: secret value is not valid UTF-8", file=sys.stderr)
+            sys.exit(1)
+        _secrets_gateway_write("set", name=name, value=value)
+        # Name only — the VALUE is never written to the audit log.
+        sel().log_tool_invocation(
+            session_key="cli",
+            source="cli",
+            tool_name="secrets_set",
+            outcome="stored",
+            metadata={"name": name},
+        )
+        # Escaped for display only — the raw name was already stored above.
+        print(f"Secret '{_escape_control_chars(name)}' stored.")
+
+    elif action == "rm":
+        name = args.name
+        # Same non-UTF-8 argv hazard as `set`: a surrogate-bearing name would
+        # crash inside `vault.delete` at AAD/key encoding. Reject cleanly first.
+        try:
+            name.encode("utf-8")
+        except UnicodeError:
+            print("error: secret name is not valid UTF-8", file=sys.stderr)
+            sys.exit(1)
+        _secrets_gateway_write("rm", name=name)
+        sel().log_tool_invocation(
+            session_key="cli",
+            source="cli",
+            tool_name="secrets_rm",
+            outcome="deleted",
+            metadata={"name": name},
+        )
+        # Escaped for display only — the raw name was already deleted above.
+        print(f"Secret '{_escape_control_chars(name)}' deleted.")
+
+    elif action == "import":
+        # The .env migration importer lives in cli_commands (_handle_secrets).
+        # Dispatch through module-level importlib to keep the load lazy (issue
+        # #3504) and satisfy the top-level-imports lint.
+        importlib.import_module("kiro_crew.cli_commands")._handle_secrets(args)
+
+    else:
+        print("Usage: kirocrew secrets <list|set|rm|import>")
 
 
 def _consolidate_cmd(args) -> None:
@@ -1602,6 +1967,29 @@ Examples:
     sel_parser.add_argument("--until", default="", help=f"Only entries before {_time_help}")
     sec_sub.add_parser("verify", help="Verify security event log HMAC integrity")
 
+    # secrets — vault management
+    secrets_parser = sub.add_parser(
+        "secrets", help="Manage the encrypted, agent-isolated secret vault"
+    )
+    secrets_sub = secrets_parser.add_subparsers(dest="secrets_action")
+    secrets_sub.add_parser("list", help="List stored secret names")
+    secrets_set = secrets_sub.add_parser("set", help="Store or update a secret")
+    secrets_set.add_argument("name", help="Secret name")
+    secrets_set.add_argument(
+        "--stdin", action="store_true", help="Read secret value from stdin (for scripting)"
+    )
+    secrets_rm = secrets_sub.add_parser("rm", help="Delete a secret")
+    secrets_rm.add_argument("name", help="Secret name")
+    secrets_import = secrets_sub.add_parser(
+        "import",
+        help="Migrate plaintext .env credentials into the vault (dry-run unless --apply)",
+    )
+    secrets_import.add_argument(
+        "--apply",
+        action="store_true",
+        help="Store the secrets and rewrite .env to secret:// refs (default: dry-run)",
+    )
+
     # policy — governance model inspection (read-only; MCP-safe)
     tn_parser = cli_help.add_command(sub, "tailnet")
     tn_sub = tn_parser.add_subparsers(dest="tailnet_action")
@@ -1689,20 +2077,6 @@ Examples:
         "--apply",
         action="store_true",
         help="Apply the deletions (default: dry-run preview that changes nothing)",
-    )
-
-    # secrets — encrypted vault maintenance. Only the migration importer lives
-    # here; the set/list/rm surface is owned by a separate change.
-    secrets_parser = sub.add_parser("secrets", help="Encrypted secret vault")
-    secrets_sub = secrets_parser.add_subparsers(dest="secrets_action")
-    secrets_import = secrets_sub.add_parser(
-        "import",
-        help="Migrate plaintext .env credentials into the vault (dry-run unless --apply)",
-    )
-    secrets_import.add_argument(
-        "--apply",
-        action="store_true",
-        help="Store the secrets and rewrite .env to secret:// refs (default: dry-run)",
     )
 
     # pod — isolated, throwaway, full-stack test instances per worktree (kubectl-style)
@@ -2694,6 +3068,8 @@ The dashboard port is set with the KIROCREW_PORT env var, not a config key.
         from kiro_crew.cli_commands import _security
 
         _security(args)
+    elif args.command == "secrets":
+        _secrets(args)
     elif args.command == "tailnet":
         from kiro_crew.cli_commands import _tailnet
 
@@ -2708,14 +3084,6 @@ The dashboard port is set with the KIROCREW_PORT env var, not a config key.
         _policy(args)
     elif args.command == "knowledge":
         _knowledge(args)
-    elif args.command == "secrets":
-        # Dispatch through the module-level `importlib` rather than a
-        # function-local `from kiro_crew.cli_commands import …`: the latter trips
-        # the `top-level-imports` lint, while a module-scope import of
-        # `cli_commands` is deliberately avoided (issue #3504 — it costs ~556 ms
-        # on every CLI start). `importlib.import_module` keeps the load lazy AND
-        # satisfies the linter.
-        importlib.import_module("kiro_crew.cli_commands")._handle_secrets(args)
     elif args.command == "pod":
         from kiro_crew.cli_commands import _pod
 

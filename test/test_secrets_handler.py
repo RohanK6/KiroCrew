@@ -29,6 +29,10 @@ def _app() -> web.Application:
     implicit owner, so existing behavioural tests exercise the authorized path.
     A test can select a different caller via the ``X-Test-User`` /
     ``X-Test-App`` headers.
+
+    ``vault_floor_in_force`` is set to ``True`` so the server-side boot-posture
+    gate passes transparently in all existing tests; use ``_app_no_floor()``
+    to exercise the gate's deny path.
     """
 
     @web.middleware
@@ -39,6 +43,23 @@ def _app() -> web.Application:
 
     app = web.Application(middlewares=[_identity])
     app["state"] = _FakeState()
+    app["vault_floor_in_force"] = True
+    setup_secrets_routes(app)
+    return app
+
+
+def _app_no_floor() -> web.Application:
+    """Like ``_app()`` but with ``vault_floor_in_force=False`` to exercise the deny path."""
+
+    @web.middleware
+    async def _identity(request, handler):
+        request["user"] = request.headers.get("X-Test-User", "local-app")
+        request["app"] = request.headers.get("X-Test-App", "")
+        return await handler(request)
+
+    app = web.Application(middlewares=[_identity])
+    app["state"] = _FakeState()
+    app["vault_floor_in_force"] = False
     setup_secrets_routes(app)
     return app
 
@@ -285,7 +306,10 @@ class TestApiSecretsLogInjection:
         with patch("kiro_crew.dashboard.handlers.secrets.config_dir", return_value=str(tmp_path)):
             async with TestClient(TestServer(app)) as client:
                 with caplog.at_level(logging.INFO, logger="kiro_crew.dashboard.handlers.secrets"):
-                    resp = await client.post("/api/secrets", json={"name": payload, "value": "v"})
+                    resp = await client.post(
+                        "/api/secrets",
+                        json={"name": payload, "value": "v"},
+                    )
                     assert resp.status == 200
 
         stored = [r for r in caplog.records if "stored via dashboard" in r.getMessage()]
@@ -379,3 +403,413 @@ class TestApiSecretsSetInputValidation:
                 # Name is still trimmed, as before.
                 assert data["name"] == "PADDED"
                 assert SecretVault(empty_vault_dir).list_names() == ["PADDED"]
+
+
+class TestApiSecretsOwnerWriteSucceeds:
+    """Owner-authorized set/delete work without any cap or floor gate."""
+
+    @pytest.mark.asyncio
+    async def test_owner_set_succeeds_no_cap(self, tmp_path: Path) -> None:
+        """POST /api/secrets by the owner succeeds — no cap or floor header needed."""
+        app = _app()
+
+        from aiohttp.test_utils import TestClient, TestServer
+
+        with patch("kiro_crew.dashboard.handlers.secrets.config_dir", return_value=str(tmp_path)):
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.post(
+                    "/api/secrets",
+                    json={"name": "OWNER_KEY", "value": "owner-value"},
+                )
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["ok"] is True
+                assert SecretVault(tmp_path).get("OWNER_KEY") is not None
+
+    @pytest.mark.asyncio
+    async def test_owner_delete_succeeds_no_cap(self, vault_dir: Path) -> None:
+        """DELETE /api/secrets/{name} by the owner succeeds — no cap or floor header needed."""
+        app = _app()
+
+        from aiohttp.test_utils import TestClient, TestServer
+
+        with patch("kiro_crew.dashboard.handlers.secrets.config_dir", return_value=str(vault_dir)):
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.delete("/api/secrets/TEST_KEY")
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["ok"] is True
+                assert SecretVault(vault_dir).get("TEST_KEY") is None
+
+
+# ── F2 lock-atomicity tests ────────────────────────────────────────────────────
+
+
+class TestSecretsLockAtomicity:
+    """The mutation path acquires _get_config_lock before vault read/write.
+
+    A concurrent agent.sandbox PATCH rotates config under the same lock.
+    Without the lock, a concurrent config rotation could overlap with a vault
+    write, introducing a race condition.
+    """
+
+    @pytest.mark.asyncio
+    async def test_set_acquires_config_lock(self, tmp_path: Path) -> None:
+        """POST /api/secrets acquires _get_config_lock before vault write."""
+        import asyncio
+        from unittest.mock import patch
+
+        lock_acquired_during_vault_write = []
+
+        real_lock = __import__(
+            "kiro_crew.dashboard.handlers.agents", fromlist=["_get_config_lock"]
+        )._get_config_lock()
+
+        original_lock_aenter = real_lock.__aenter__
+
+        lock_is_held = asyncio.Event()
+
+        class _TrackingLock:
+            async def __aenter__(self_inner):
+                lock_is_held.set()
+                return await original_lock_aenter()
+
+            async def __aexit__(self_inner, *args):
+                lock_is_held.clear()
+                return await real_lock.__aexit__(*args)
+
+        class _FakeVault:
+            async def set(self, name, value):
+                # Record whether the lock was held when vault.set was called.
+                lock_acquired_during_vault_write.append(lock_is_held.is_set())
+
+        app = _app()
+
+        with (
+            patch(
+                "kiro_crew.dashboard.handlers.secrets._get_config_lock",
+                return_value=_TrackingLock(),
+            ),
+            patch(
+                "kiro_crew.dashboard.handlers.secrets.SecretVault",
+                return_value=_FakeVault(),
+            ),
+        ):
+            from aiohttp.test_utils import TestClient, TestServer
+
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.post(
+                    "/api/secrets",
+                    json={"name": "MY_KEY", "value": "s3cret"},
+                )
+
+        assert resp.status == 200
+        assert lock_acquired_during_vault_write, "vault.set was never called"
+        assert (
+            lock_acquired_during_vault_write[0] is True
+        ), "lock must be held when vault.set is called"
+
+    @pytest.mark.asyncio
+    async def test_delete_acquires_config_lock(self, tmp_path: Path) -> None:
+        """DELETE /api/secrets/{name} acquires _get_config_lock before vault write."""
+        import asyncio
+        from unittest.mock import patch
+
+        lock_acquired_during_vault_delete = []
+
+        real_lock = __import__(
+            "kiro_crew.dashboard.handlers.agents", fromlist=["_get_config_lock"]
+        )._get_config_lock()
+
+        original_lock_aenter = real_lock.__aenter__
+
+        lock_is_held = asyncio.Event()
+
+        class _TrackingLock:
+            async def __aenter__(self_inner):
+                lock_is_held.set()
+                return await original_lock_aenter()
+
+            async def __aexit__(self_inner, *args):
+                lock_is_held.clear()
+                return await real_lock.__aexit__(*args)
+
+        class _FakeVault:
+            async def delete(self, name):
+                lock_acquired_during_vault_delete.append(lock_is_held.is_set())
+
+        app = _app()
+
+        with (
+            patch(
+                "kiro_crew.dashboard.handlers.secrets._get_config_lock",
+                return_value=_TrackingLock(),
+            ),
+            patch(
+                "kiro_crew.dashboard.handlers.secrets.SecretVault",
+                return_value=_FakeVault(),
+            ),
+        ):
+            from aiohttp.test_utils import TestClient, TestServer
+
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.delete("/api/secrets/MY_KEY")
+
+        assert resp.status == 200
+        assert lock_acquired_during_vault_delete, "vault.delete was never called"
+        assert (
+            lock_acquired_during_vault_delete[0] is True
+        ), "lock must be held when vault.delete is called"
+
+
+class TestVaultFloorGate:
+    """Server-side boot-posture gate: set/delete require vault_floor_in_force=True."""
+
+    @pytest.mark.asyncio
+    async def test_set_succeeds_when_floor_in_force(self, tmp_path: Path) -> None:
+        """POST /api/secrets succeeds when vault_floor_in_force is True (normal path)."""
+        app = _app()  # vault_floor_in_force=True
+
+        from aiohttp.test_utils import TestClient, TestServer
+
+        with patch("kiro_crew.dashboard.handlers.secrets.config_dir", return_value=str(tmp_path)):
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.post("/api/secrets", json={"name": "MY_KEY", "value": "s3cret"})
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_set_denied_when_floor_not_in_force(self, tmp_path: Path) -> None:
+        """POST /api/secrets returns 403 vault_floor_not_in_force when floor absent."""
+        app = _app_no_floor()  # vault_floor_in_force=False
+
+        from aiohttp.test_utils import TestClient, TestServer
+
+        with (
+            patch("kiro_crew.dashboard.handlers.secrets.config_dir", return_value=str(tmp_path)),
+            patch(
+                "kiro_crew.dashboard.handlers.secrets._sel",
+                return_value=type(
+                    "_FakeSel",
+                    (),
+                    {"log_api_access": lambda self, **kw: None},
+                )(),
+            ),
+        ):
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.post("/api/secrets", json={"name": "MY_KEY", "value": "s3cret"})
+                assert resp.status == 403
+                data = await resp.json()
+                assert data["code"] == "vault_floor_not_in_force"
+
+    @pytest.mark.asyncio
+    async def test_delete_denied_when_floor_not_in_force(self, tmp_path: Path) -> None:
+        """DELETE /api/secrets/{name} returns 403 vault_floor_not_in_force when floor absent."""
+        app = _app_no_floor()  # vault_floor_in_force=False
+
+        from aiohttp.test_utils import TestClient, TestServer
+
+        with patch(
+            "kiro_crew.dashboard.handlers.secrets._sel",
+            return_value=type(
+                "_FakeSel",
+                (),
+                {"log_api_access": lambda self, **kw: None},
+            )(),
+        ):
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.delete("/api/secrets/MY_KEY")
+                assert resp.status == 403
+                data = await resp.json()
+                assert data["code"] == "vault_floor_not_in_force"
+
+    @pytest.mark.asyncio
+    async def test_list_unaffected_by_floor(self, vault_dir: Path) -> None:
+        """GET /api/secrets (list) is NOT gated by vault_floor_in_force."""
+        app = _app_no_floor()  # vault_floor_in_force=False, but list should still work
+
+        from aiohttp.test_utils import TestClient, TestServer
+
+        with patch("kiro_crew.dashboard.handlers.secrets.config_dir", return_value=str(vault_dir)):
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.get("/api/secrets")
+                assert resp.status == 200
+                data = await resp.json()
+                # List returns the names regardless of floor posture
+                assert "names" in data
+
+
+def _app_posture(posture: str) -> web.Application:
+    """Like ``_app()`` but with an explicit ``vault_floor_posture`` string.
+
+    Used to exercise the three-way (ENFORCED / ABSENT / NOT_APPLICABLE) paths
+    introduced by the posture redesign.  The legacy ``vault_floor_in_force``
+    boolean is derived from the posture string to keep backwards compatibility.
+    """
+    from kiro_crew.sandbox import VAULT_FLOOR_ABSENT
+
+    @web.middleware
+    async def _identity(request, handler):
+        request["user"] = request.headers.get("X-Test-User", "local-app")
+        request["app"] = request.headers.get("X-Test-App", "")
+        return await handler(request)
+
+    app = web.Application(middlewares=[_identity])
+    app["state"] = _FakeState()
+    app["vault_floor_posture"] = posture
+    app["vault_floor_in_force"] = posture != VAULT_FLOOR_ABSENT
+    setup_secrets_routes(app)
+    return app
+
+
+class TestVaultFloorThreeWayPosture:
+    """Three-way posture gate: ENFORCED and NOT_APPLICABLE allow; ABSENT refuses."""
+
+    @pytest.mark.asyncio
+    async def test_enforced_allows_set(self, tmp_path: Path) -> None:
+        """ENFORCED posture: POST /api/secrets succeeds."""
+        from kiro_crew.sandbox import VAULT_FLOOR_ENFORCED
+
+        app = _app_posture(VAULT_FLOOR_ENFORCED)
+        from aiohttp.test_utils import TestClient, TestServer
+
+        with patch("kiro_crew.dashboard.handlers.secrets.config_dir", return_value=str(tmp_path)):
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.post("/api/secrets", json={"name": "K", "value": "v"})
+                assert resp.status == 200
+                assert (await resp.json())["ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_not_applicable_allows_set(self, tmp_path: Path) -> None:
+        """NOT_APPLICABLE posture (Windows/no-userns): POST /api/secrets succeeds.
+
+        On a platform with no vault-hide mechanism at all (Windows, no-userns)
+        the owner gate is the only boundary; we must NOT 403 the owner's own
+        Settings page.
+        """
+        from kiro_crew.sandbox import VAULT_FLOOR_NOT_APPLICABLE
+
+        app = _app_posture(VAULT_FLOOR_NOT_APPLICABLE)
+        from aiohttp.test_utils import TestClient, TestServer
+
+        with patch("kiro_crew.dashboard.handlers.secrets.config_dir", return_value=str(tmp_path)):
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.post("/api/secrets", json={"name": "K", "value": "v"})
+                assert resp.status == 200
+                assert (await resp.json())["ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_absent_refuses_set(self, tmp_path: Path) -> None:
+        """ABSENT posture: POST /api/secrets returns 403 vault_floor_not_in_force."""
+        from kiro_crew.sandbox import VAULT_FLOOR_ABSENT
+
+        app = _app_posture(VAULT_FLOOR_ABSENT)
+        from aiohttp.test_utils import TestClient, TestServer
+
+        with (
+            patch("kiro_crew.dashboard.handlers.secrets.config_dir", return_value=str(tmp_path)),
+            patch(
+                "kiro_crew.dashboard.handlers.secrets._sel",
+                return_value=type("_FakeSel", (), {"log_api_access": lambda self, **kw: None})(),
+            ),
+        ):
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.post("/api/secrets", json={"name": "K", "value": "v"})
+                assert resp.status == 403
+                assert (await resp.json())["code"] == "vault_floor_not_in_force"
+
+    @pytest.mark.asyncio
+    async def test_not_applicable_allows_delete(self, tmp_path: Path) -> None:
+        """NOT_APPLICABLE posture: DELETE /api/secrets/{name} succeeds."""
+        from kiro_crew.sandbox import VAULT_FLOOR_NOT_APPLICABLE
+
+        vault = SecretVault(tmp_path)
+        vault._set_sync("EXISTING", "val")
+        app = _app_posture(VAULT_FLOOR_NOT_APPLICABLE)
+        from aiohttp.test_utils import TestClient, TestServer
+
+        with patch("kiro_crew.dashboard.handlers.secrets.config_dir", return_value=str(tmp_path)):
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.delete("/api/secrets/EXISTING")
+                assert resp.status == 200
+
+    @pytest.mark.asyncio
+    async def test_absent_refuses_delete(self, tmp_path: Path) -> None:
+        """ABSENT posture: DELETE /api/secrets/{name} returns 403."""
+        from kiro_crew.sandbox import VAULT_FLOOR_ABSENT
+
+        app = _app_posture(VAULT_FLOOR_ABSENT)
+        from aiohttp.test_utils import TestClient, TestServer
+
+        with patch(
+            "kiro_crew.dashboard.handlers.secrets._sel",
+            return_value=type("_FakeSel", (), {"log_api_access": lambda self, **kw: None})(),
+        ):
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.delete("/api/secrets/SOME_KEY")
+                assert resp.status == 403
+                assert (await resp.json())["code"] == "vault_floor_not_in_force"
+
+    @pytest.mark.asyncio
+    async def test_posture_absent_legacy_boolean_false(self, tmp_path: Path) -> None:
+        """Legacy vault_floor_in_force=False (no posture key) still refuses mutations."""
+        # This exercises the fallback path for test helpers using the old boolean.
+        app = _app_no_floor()  # sets vault_floor_in_force=False, no vault_floor_posture key
+        from aiohttp.test_utils import TestClient, TestServer
+
+        with (
+            patch("kiro_crew.dashboard.handlers.secrets.config_dir", return_value=str(tmp_path)),
+            patch(
+                "kiro_crew.dashboard.handlers.secrets._sel",
+                return_value=type("_FakeSel", (), {"log_api_access": lambda self, **kw: None})(),
+            ),
+        ):
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.post("/api/secrets", json={"name": "K", "value": "v"})
+                assert resp.status == 403
+
+    @pytest.mark.asyncio
+    async def test_floor_check_runs_inside_lock_before_write(self, tmp_path: Path) -> None:
+        """TOCTOU: posture flipped to ABSENT under the lock must refuse the write.
+
+        The floor check now runs INSIDE _get_config_lock, immediately before the
+        vault write. The agent.sandbox config-patch handler updates
+        app['vault_floor_posture'] while holding that same lock. We simulate a
+        concurrent sandbox-disable by flipping the posture to ABSENT at the moment
+        the handler acquires the lock; the write must then be refused (403) rather
+        than landing after isolation was removed. If the check still ran BEFORE the
+        lock (the old TOCTOU), it would read the stale ENFORCED value and return 200.
+        """
+        from contextlib import asynccontextmanager
+
+        from kiro_crew.sandbox import VAULT_FLOOR_ABSENT, VAULT_FLOOR_ENFORCED
+
+        app = _app_posture(VAULT_FLOOR_ENFORCED)
+        from aiohttp.test_utils import TestClient, TestServer
+
+        @asynccontextmanager
+        async def _flip_posture_lock():
+            # Emulate a concurrent sandbox-disable that ran under the same lock:
+            # by the time this handler holds the lock, the posture is ABSENT.
+            app["vault_floor_posture"] = VAULT_FLOOR_ABSENT
+            yield
+
+        with (
+            patch("kiro_crew.dashboard.handlers.secrets.config_dir", return_value=str(tmp_path)),
+            patch(
+                "kiro_crew.dashboard.handlers.secrets._get_config_lock",
+                _flip_posture_lock,
+            ),
+            patch(
+                "kiro_crew.dashboard.handlers.secrets._sel",
+                return_value=type("_FakeSel", (), {"log_api_access": lambda self, **kw: None})(),
+            ),
+        ):
+            async with TestClient(TestServer(app)) as client:
+                resp = await client.post("/api/secrets", json={"name": "K", "value": "v"})
+                assert resp.status == 403
+                assert (await resp.json())["code"] == "vault_floor_not_in_force"
+                from kiro_crew.secrets.vault import SecretVault
+
+                assert SecretVault(str(tmp_path)).list_names() == []

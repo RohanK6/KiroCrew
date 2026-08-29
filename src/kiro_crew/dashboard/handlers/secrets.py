@@ -1,4 +1,10 @@
-"""Secrets vault management API handlers for the dashboard."""
+"""Secrets vault management API handlers for the dashboard.
+
+Both mutating endpoints (POST /api/secrets and DELETE /api/secrets/{name}) are
+authorized by :func:`_owner_only`.  Owner authorization is the single
+authorization boundary for vault writes: only the configured dashboard owner
+may create, overwrite, or delete vault entries.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +14,9 @@ import logging
 from aiohttp import web
 
 from kiro_crew.config.loader import config_dir
+from kiro_crew.dashboard.handlers.agents import _get_config_lock
 from kiro_crew.dashboard.handlers.source_providers import is_owner_dashboard_request
+from kiro_crew.sandbox import VAULT_FLOOR_ABSENT, VAULT_FLOOR_NOT_APPLICABLE
 from kiro_crew.secrets import SecretVault
 
 logger = logging.getLogger(__name__)
@@ -57,6 +65,69 @@ async def _owner_only(request: web.Request, operation: str) -> web.Response | No
         logger.debug("SEL audit for non-owner %s failed", operation, exc_info=True)
     return web.json_response(
         {"error": "owner authorization required", "code": "owner_only"},
+        status=403,
+    )
+
+
+async def _floor_in_force_check(request: web.Request, operation: str) -> web.Response | None:
+    """Return a 403 unless the vault floor posture permits mutations.
+
+    Authorization for vault mutations requires not just owner identity but also
+    a running OS-level sandbox that actively hides ``.vault`` from agent
+    subprocesses.  Without that hide, an escaped agent can open ``.vault`` directly
+    despite not holding an owner token — the token gate becomes necessary-but-not-
+    sufficient.  This check reads the **boot-resolved** ``app["vault_floor_posture"]``
+    (or legacy ``app["vault_floor_in_force"]``) flag set once in
+    ``server.start_dashboard`` from the live sandbox backend probe, updated on
+    agent.sandbox config changes.
+
+    THREE-WAY posture (stored as a string via ``sandbox.VAULT_FLOOR_*`` constants):
+
+    - ``"enforced"`` — OS hide is confirmed active and masking the vault → ALLOW.
+    - ``"absent"`` — mechanism exists but not masking vault (sandbox=off on a
+      capable host, or vault relocated outside hide set) → REFUSE (403).
+    - ``"not_applicable"`` — platform has no vault-hide mechanism (Windows, no-userns)
+      → ALLOW via owner gate alone (refusing 403s the owner's own Settings page).
+
+    Falls back to the legacy boolean ``vault_floor_in_force`` for compatibility
+    with test helpers that pre-date the three-way split.
+
+    ``api_secrets_list`` is intentionally excluded: listing secret names does not
+    expose values and is not a mutation, so the floor check is not needed there.
+
+    Returns the 403 to send, or ``None`` when mutations are permitted.
+    """
+    posture = request.app.get("vault_floor_posture")
+    if posture is None:
+        # Legacy boolean path (pre-three-way test helpers).
+        in_force = request.app.get("vault_floor_in_force", False)
+        posture = "enforced" if in_force else "absent"
+
+    # FLOOR_NOT_APPLICABLE: no hide mechanism on this platform — allow via owner gate.
+    if posture == VAULT_FLOOR_NOT_APPLICABLE or posture == "not_applicable":
+        return None
+    # FLOOR_ENFORCED: hide confirmed active.
+    if posture != VAULT_FLOOR_ABSENT and posture != "absent":
+        return None
+    # FLOOR_ABSENT: mechanism exists but not masking vault → refuse.
+    caller = str(request.get("user") or "unknown")
+    try:
+        await asyncio.to_thread(
+            lambda: _sel().log_api_access(
+                caller=caller,
+                operation=operation,
+                outcome="denied",
+                source="dashboard",
+                resources="vault_floor_not_in_force",
+            )
+        )
+    except Exception:  # pragma: no cover — audit must never change the outcome
+        logger.debug("SEL audit for vault_floor_not_in_force %s failed", operation, exc_info=True)
+    return web.json_response(
+        {
+            "error": "vault mutations require the OS sandbox floor to be in force",
+            "code": "vault_floor_not_in_force",
+        },
         status=403,
     )
 
@@ -140,7 +211,18 @@ async def api_secrets_set(request: web.Request) -> web.Response:
         )
 
     vault = SecretVault(config_dir())
-    await vault.set(name, value)
+    # Authorization for vault writes is the owner gate above (_owner_only) AND
+    # the vault-floor posture. The floor check runs INSIDE the config lock,
+    # immediately before the write: the agent.sandbox config-patch handler
+    # updates app["vault_floor_posture"] while holding this same lock, so
+    # reading the posture here makes check-and-write atomic against a concurrent
+    # sandbox-disable (closes the TOCTOU where a mutation could land just after
+    # isolation was removed). `.set` offloads its disk I/O via asyncio.to_thread.
+    async with _get_config_lock():
+        floor_denied = await _floor_in_force_check(request, "secrets_set")
+        if floor_denied is not None:
+            return floor_denied
+        await vault.set(name, value)
     logger.info("Vault entry '%s' stored via dashboard", _sanitize_for_log(name))
     return web.json_response({"ok": True, "name": name})
 
@@ -157,7 +239,14 @@ async def api_secrets_delete(request: web.Request) -> web.Response:
         )
 
     vault = SecretVault(config_dir())
-    await vault.delete(name)
+    # Owner-only authorization + vault-floor posture checked INSIDE the lock,
+    # immediately before the delete, atomic against a concurrent sandbox-disable
+    # (see api_secrets_set for the full rationale).
+    async with _get_config_lock():
+        floor_denied = await _floor_in_force_check(request, "secrets_delete")
+        if floor_denied is not None:
+            return floor_denied
+        await vault.delete(name)
     logger.info("Vault entry '%s' deleted via dashboard", _sanitize_for_log(name))
     return web.json_response({"ok": True, "name": name})
 

@@ -2809,7 +2809,6 @@ def token_auth_middleware(
         request["auth_token"] = session_token
         # POSITIVE dashboard-user signal for the WS scope gate (see above).
         request["is_dashboard_user"] = not app_name
-
         # App-token least-privilege gate (CWE-269): an app token is confined to
         # its own namespace + its manifest ``permissions.api`` allowlist. This
         # is the primary enforcement point for the normal cookie/query-param

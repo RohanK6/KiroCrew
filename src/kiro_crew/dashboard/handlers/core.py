@@ -21,7 +21,7 @@ from aiohttp import web
 from aiohttp.client_exceptions import ClientConnectionResetError
 
 import kiro_crew
-from kiro_crew import beacon, platform_compat, stt
+from kiro_crew import beacon, platform_compat, sandbox, stt
 from kiro_crew.acp_backends import selectable_backend_values
 from kiro_crew.computer_use.types import MAX_SCREENSHOT_MAX_PX as _CU_MAX_SCREENSHOT_MAX_PX
 from kiro_crew.computer_use.types import MAX_TREE_NODES_LIMIT as _CU_MAX_TREE_NODES_LIMIT
@@ -1759,6 +1759,36 @@ def _tailnet_governance_pinned_off() -> bool:
     return tailnet.is_governance_pinned_off(audit_tool="config_patch_dashboard_tailnet")
 
 
+def _local_agent_overlay(base_cfg_path: Path) -> dict:
+    """Return the ``agent`` section from ``config.local.json``, or ``{}``.
+
+    That file is USER-OWNED and deep-merged OVER ``config.json`` (see
+    ``KiroCrewConfig.load``), so a key it defines wins the merge — a base-config
+    write to the same key changes nothing the runtime reads. The sandbox patch
+    path consults this to avoid reporting an overlay-shadowed write as applied.
+
+    ``base_cfg_path`` is the resolved ``config.json`` path the caller is
+    mutating (from the top-level-imported, test-redirectable ``config_path()``);
+    the overlay is its ``config.local.json`` sibling. Deriving it here — rather
+    than a function-local ``import config_local_path`` — keeps the import edge at
+    module top (``top-level-imports`` rule) and stays consistent with whatever
+    path the caller actually writes.
+    """
+    path = base_cfg_path.with_name("config.local.json")
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        # Unreadable overlay: treat as absent (the loader logs and ignores it
+        # too, so behaving otherwise here would diverge from the runtime).
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    section = raw.get("agent")
+    return section if isinstance(section, dict) else {}
+
+
 async def api_kirocrew_config_patch(request: web.Request) -> web.Response:
     """PATCH /api/config/kirocrew — update a single config field."""
     from kiro_crew.config.loader import ConfigReadError, config_path, update_config_locked
@@ -2023,11 +2053,67 @@ async def api_kirocrew_config_patch(request: web.Request) -> web.Response:
     cfg_path = config_path()
     from kiro_crew.dashboard.handlers.agents import _get_config_lock  # noqa: F811
 
+    # _prev_sandbox is captured INSIDE the lock (see below) so that the
+    # capture, write, and any fail-closed revert are all serialized under the
+    # same mutex.  If captured before the lock two concurrent off->auto patches
+    # both see "off", one commits "auto" successfully, but the other's later
+    # teardown-failure revert would restore "off" — clobbering the successful
+    # write and contradicting the 200 already sent to the first caller.
+    _prev_sandbox: str | None = None
+
     async with _get_config_lock():
         parts = path_key.split(".")
 
+        # For agent.sandbox, capture the MERGED EFFECTIVE tier the runtime is
+        # currently spawning agents under (base + config.local.json overlay),
+        # BEFORE the write. The no-op/tightening decision keys off this, not the
+        # raw base value: a local overlay pinning sandbox="off" means the runtime
+        # tier is "off" regardless of the base, so a base off->auto write is a
+        # real tightening that must NOT be short-circuited as a no-op.
+        _prev_effective: str | None = None
+        if path_key == "agent.sandbox":
+            _cfg_before = await asyncio.to_thread(KiroCrewConfig.load)
+            _prev_effective = getattr(_cfg_before.agent, "sandbox", None) or "auto"
+
+            # Detect an overlay that shadows agent.sandbox BEFORE writing: if the
+            # local overlay pins sandbox, the base write can't take effect, and
+            # writing then rejecting leaves the base corrupted (removing the
+            # overlay later unexpectedly activates the written value). Offloaded
+            # to a thread so a slow/network-mounted config.local.json never
+            # stalls the event loop.
+            _overlay = await asyncio.to_thread(_local_agent_overlay, cfg_path)
+            if "sandbox" in _overlay and _overlay.get("sandbox") != value:
+                _log_sel("error", f"{path_key}=overlay_shadowed")
+                return web.json_response(
+                    {
+                        "error": (
+                            "agent.sandbox is pinned by config.local.json; the base "
+                            "config change cannot take effect. Edit the local overlay "
+                            "instead."
+                        ),
+                        "code": "sandbox_overlay_shadowed",
+                    },
+                    status=409,
+                )
+
+        # Capture the pre-write value for agent.sandbox while holding the lock
+        # so that capture + write + rollback are all serialized.  We capture the
+        # RAW BASE value from the base config file being mutated (not
+        # KiroCrewConfig.load(), which MERGES the local overlay): if the base is
+        # "auto" but a local overlay sets "off", the merged value is "off", and a
+        # rollback that wrote that back would corrupt the BASE preference from
+        # "auto" to "off".  The capture happens inside _mutate_config_patch
+        # below, which receives the raw base dict.
+
         def _mutate_config_patch(data: dict) -> dict | None:
             """Apply a single dotted-key assignment to the raw config dict."""
+            nonlocal _prev_sandbox
+            if path_key == "agent.sandbox":
+                _agent = data.get("agent")
+                # None when the base config has never set agent.sandbox — the
+                # rollback then removes the key (restores "unset"), not a wrong
+                # concrete tier.
+                _prev_sandbox = _agent.get("sandbox") if isinstance(_agent, dict) else None
             # Walk (creating) intermediate objects, then set the leaf. Handles
             # arbitrary depth uniformly — 1-level ("auto_update"), 2-level
             # ("agent.model"), and 3-level ("agent.role_models.background") —
@@ -2053,6 +2139,144 @@ async def api_kirocrew_config_patch(request: web.Request) -> web.Response:
         except OSError:
             _log_sel("error", f"{path_key}=write_failed")
             return web.json_response({"error": "failed to write config file"}, status=500)
+
+        # --- agent.sandbox: teardown + conditional revert held under the SAME lock ---
+        #
+        # The teardown (reload_provider_factory) and the fail-closed revert
+        # (update_config_locked with _revert_sandbox) MUST execute while the
+        # in-process config lock is still held.  Without this, two concurrent
+        # off->auto requests can both write "auto" and then, if one's teardown
+        # fails, its rollback restores "off" — clobbering the other caller's
+        # committed "auto" and contradicting the 200 it already returned.
+        #
+        # _get_config_lock() is an in-process asyncio.Lock (LoopBoundLock).
+        # update_config_locked uses a SEPARATE cross-process fcntl.flock on a
+        # sidecar .lock file.  The two lock domains are independent, so holding
+        # the asyncio lock across an await asyncio.to_thread(update_config_locked)
+        # call does NOT create a deadlock or priority inversion.
+        #
+        # All other path_key branches (provider, model, background, etc.) do NOT
+        # need the lock beyond this point and fall through to the code below after
+        # the lock is released.
+        if path_key == "agent.sandbox":
+            # Post-write merged effective config: the overlay-shadow case is
+            # already rejected pre-write, so this load's sandbox == value unless
+            # a race occurred (which the config lock prevents). Used for the
+            # no-op/tightening decision and the masked response.
+            cfg_for_sandbox = await asyncio.to_thread(KiroCrewConfig.load)
+            _effective_now = getattr(cfg_for_sandbox.agent, "sandbox", None) or "auto"
+
+            _is_tightening = _effective_now == "auto" and _prev_effective == "off"
+            state_for_sandbox: DashboardState = request.app["state"]
+            if value == _prev_effective:
+                # No-op save (the EFFECTIVE tier did not change): tearing down live
+                # sessions here would abort in-flight turns for nothing, and there
+                # is no new tier to re-confine to. Skip the teardown and return the
+                # current config unchanged. The write did land, so record it.
+                _log_sel("success", f"{path_key}={value}")
+                return web.json_response(_masked_config_dict(cfg_for_sandbox))
+            try:
+                _surviving = await state_for_sandbox.sessions.reload_provider_factory()
+                if _is_tightening and _surviving:
+                    # Teardown returned without raising, but one or more prior
+                    # sessions failed to shut down — an unconfined runtime may
+                    # still be alive under the OLD "off" tier. Persisting "auto"
+                    # and returning success here would report confinement that is
+                    # not actually enforced. Raise into the fail-closed branch
+                    # below so the on-disk value is reverted.
+                    raise RuntimeError(
+                        f"{_surviving} session(s) survived sandbox tightening teardown"
+                    )
+                logger.info(
+                    "agent.sandbox set to %r — live sessions torn down so new spawns "
+                    "start under the updated sandbox tier",
+                    value,
+                )
+                # Teardown succeeded: the change is now both persisted AND enforced,
+                # so this is the point at which it is truthfully a success.
+                _log_sel("success", f"{path_key}={value}")
+            except Exception:
+                if _is_tightening:
+                    # Fail closed: revert the on-disk value so the CLI floor check
+                    # cannot be fooled into believing confinement is in place.
+                    # HTTP 500 = fail closed; returning 200 with tightened-but-
+                    # unenforceable config would create the exact attack surface
+                    # the sandbox floor is meant to prevent.
+                    _prev = _prev_sandbox  # captured before write above
+
+                    def _revert_sandbox(data: dict) -> dict | None:
+                        _ag = data.setdefault("agent", {})
+                        if _prev is None:
+                            # Base config never set agent.sandbox — restore that
+                            # (delete the key) rather than persisting a null.
+                            _ag.pop("sandbox", None)
+                        else:
+                            _ag["sandbox"] = _prev
+                        return data
+
+                    try:
+                        await asyncio.to_thread(
+                            update_config_locked, cfg_path, mutate=_revert_sandbox
+                        )
+                        logger.error(
+                            "agent.sandbox tightening off->auto REVERTED: teardown failed "
+                            "and live unconfined sessions may remain; config restored to %r",
+                            _prev,
+                            exc_info=True,
+                        )
+                    except Exception:
+                        logger.error(
+                            "agent.sandbox tightening off->auto: teardown failed AND "
+                            "revert failed; config may be inconsistent",
+                            exc_info=True,
+                        )
+                    return web.json_response(
+                        {
+                            "error": (
+                                "sandbox tier change could not be applied safely: "
+                                "live session teardown failed"
+                            ),
+                            "code": "sandbox_teardown_failed",
+                        },
+                        status=500,
+                    )
+                # Loosening or no-op: best-effort, surviving confined sessions are safe.
+                logger.warning(
+                    "Session teardown after agent.sandbox change failed; "
+                    "live sessions may still be running under the previous tier",
+                    exc_info=True,
+                )
+                # Loosening still persisted the change and returns 200; the
+                # surviving sessions are MORE confined than requested, so record
+                # the change as applied.
+                _log_sel("success", f"{path_key}={value}")
+            # Vault writes are authorized solely by the existing owner-only gate
+            # on /api/secrets (no write-capability token), so a sandbox tier
+            # change has no cap to rotate or invalidate here — the tier change
+            # itself is already persisted + enforced (or reverted) above.
+            #
+            # Refresh the vault floor posture stored in app so subsequent
+            # /api/secrets requests see the updated posture without a gateway
+            # restart.  The new effective mode is already on disk; vault_floor_posture
+            # reads it through the in-memory boot config already resolved above.
+            # Off-loop: vault_floor_posture reads config_dir() which may stat.
+            try:
+                _new_mode = str(getattr(cfg_for_sandbox.agent, "sandbox", "auto"))
+                _new_posture = await asyncio.to_thread(sandbox.vault_floor_posture, _new_mode)
+                request.app["vault_floor_posture"] = _new_posture
+                request.app["vault_floor_in_force"] = _new_posture != sandbox.VAULT_FLOOR_ABSENT
+                logger.info(
+                    "vault_floor_posture updated after agent.sandbox change to %r: %s",
+                    _new_mode,
+                    _new_posture,
+                )
+            except Exception:
+                logger.warning(
+                    "vault_floor_posture refresh after agent.sandbox change failed; "
+                    "posture unchanged until restart",
+                    exc_info=True,
+                )
+        # --- end agent.sandbox critical section ---
 
     _log_sel("success", f"{path_key}={value}")
 

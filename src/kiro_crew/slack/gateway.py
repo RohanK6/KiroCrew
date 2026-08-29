@@ -9975,7 +9975,7 @@ class GatewayOrchestrator:
             )
             raise SystemExit(1)
 
-        # Clean up orphaned kiro-cli processes from previous runs
+        # Clean up orphaned kiro-cli processes from previous runs.
         from kiro_crew.session import cleanup_orphaned_sessions
 
         cleanup_orphaned_sessions()

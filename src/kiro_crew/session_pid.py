@@ -1256,6 +1256,94 @@ def _env_has_kirocrew_marker(pid: int) -> bool:
     return needle in environ.split(b"\x00")
 
 
+def agent_marker_in_ancestry(pid: int | None = None) -> bool:
+    """True if *pid* OR any of its process ancestors carries the agent marker.
+
+    Walks the parent-PID chain (``platform_compat.get_ppid``) from *pid*
+    (default: this process) toward init, checking each for the
+    ``KIROCREW_SPAWNED`` environ marker via :func:`_env_has_kirocrew_marker`.
+
+    Why the ANCESTRY and not just ``os.environ``: the current-process env var is
+    trivially strippable by the caller (``env -i`` / ``env -u`` / ``del
+    os.environ[...]``) before it execs a child, so a check on the child's own
+    env fails open for exactly the escalation it is meant to stop. A child can
+    scrub its OWN environment but cannot rewrite the exec-time environ of an
+    already-running ANCESTOR, so a marker planted by the gateway/ACP runtime that
+    spawned the session survives into ``/proc/<ancestor>/environ`` no matter what
+    the child does. That makes the ancestry the boundary and the child env merely
+    a fast-path hint.
+
+    Linux-only detection and returns ``False`` on every other platform and on any
+    read failure — same contract and rationale as
+    :func:`_env_has_kirocrew_marker` (no reliable same-UID environ read exists
+    off Linux). A ``False`` here therefore means "no marked ancestor was FOUND",
+    which off Linux is NOT the same as "no marked ancestor exists" — a security
+    gate must not treat this ``False`` as proof of a human session. Use
+    :func:`ancestry_inspection_supported` alongside it, or the combined
+    :func:`agent_session_blocks_vault_mutation` gate, when the answer must fail
+    closed.
+    """
+    if not ancestry_inspection_supported():
+        return False
+    cur = os.getpid() if pid is None else int(pid)
+    seen: set[int] = set()
+    # Walk to init (pid <= 1) rather than stopping at a fixed hop count: a fixed
+    # cap fails OPEN — an agent could nest more than the cap's worth of unmarked
+    # shells so the marked ancestor falls beyond the scan and the gate reads
+    # "human". Termination is guaranteed WITHOUT a cap: every pid is recorded in
+    # ``seen`` and revisited-pid breaks the loop, so a (pathological) ppid cycle
+    # cannot spin forever, and a real ancestry chain is finite and reaches init.
+    while cur > 1 and cur not in seen:
+        seen.add(cur)
+        if _env_has_kirocrew_marker(cur):
+            return True
+        parent = platform_compat.get_ppid(cur)
+        if parent <= 0:
+            break
+        cur = parent
+    return False
+
+
+def ancestry_inspection_supported() -> bool:
+    """True only where the per-process environ ancestry read is reliable.
+
+    Currently Linux (``/proc/<pid>/environ``, same-UID readable). macOS and
+    Windows expose a parent-PID chain (:func:`platform_compat.get_ppid`) but no
+    reliable same-UID way to read another process's *environment*, so the
+    ancestry marker walk cannot run there — and a security gate must treat that
+    as "cannot prove this is a human session", not "it is one".
+    """
+    return sys.platform == "linux"
+
+
+def agent_session_blocks_vault_mutation() -> bool:
+    """Fail-CLOSED gate for vault MUTATION from an agent session.
+
+    Returns ``True`` (BLOCK the mutation) when ANY of:
+
+    * ``KIROCREW_SPAWNED`` is set in this process's own environment — the honest
+      fast path;
+    * a marked ancestor is found by :func:`agent_marker_in_ancestry` — catches a
+      child that scrubbed its OWN env (``env -u KIROCREW_SPAWNED``) but cannot
+      rewrite an already-running ancestor's environ;
+    * ancestry inspection is **unsupported on this platform**
+      (:func:`ancestry_inspection_supported` is ``False`` — macOS/Windows).
+
+    The last clause is the fail-closed rule: where we cannot read the ancestry,
+    a stripped env marker leaves us unable to distinguish a hostile agent from a
+    human, so the mutation is refused rather than allowed. The env-marker check
+    is retained on those platforms so an HONEST agent (marker intact) still gets
+    the clear "run it from your own terminal" message; a human on macOS/Windows
+    reaches the vault through the dashboard Settings → Secrets owner path, which
+    is unaffected.
+    """
+    if KIROCREW_SPAWNED_ENV in os.environ:
+        return True
+    if not ancestry_inspection_supported():
+        return True
+    return agent_marker_in_ancestry()
+
+
 def _is_sweepable_orphan_mcp(pid: int, cmdline: bytes) -> bool:
     """Positive-identity gate for the orphan sweep (find AND pre-kill re-verify).
 

@@ -1279,6 +1279,185 @@ class TestEnvHasKirocrewMarker:
             proc.wait()
 
 
+class TestAgentMarkerInAncestry:
+    """Parent-chain walk that catches an env-scrubbed agent child."""
+
+    def test_non_linux_fails_closed(self) -> None:
+        from kiro_crew.session_pid import agent_marker_in_ancestry
+
+        with patch("kiro_crew.session_pid.sys") as mock_sys:
+            mock_sys.platform = "darwin"
+            assert agent_marker_in_ancestry(1234) is False
+
+    def test_self_marked_returns_true_without_walking(self) -> None:
+        """A marker on the starting pid short-circuits before any get_ppid call."""
+        from kiro_crew.session_pid import agent_marker_in_ancestry
+
+        with (
+            patch("kiro_crew.session_pid.sys") as mock_sys,
+            patch("kiro_crew.session_pid._env_has_kirocrew_marker", return_value=True),
+            patch("kiro_crew.platform_compat.get_ppid") as mock_ppid,
+        ):
+            mock_sys.platform = "linux"
+            assert agent_marker_in_ancestry(4321) is True
+        mock_ppid.assert_not_called()
+
+    def test_marker_found_on_ancestor_when_child_clean(self) -> None:
+        """Child (pid 500) has NO marker; its parent (pid 42) does → True.
+
+        This is the escalation case: the child scrubbed its own environ but the
+        ancestor's is intact and unrewritable by the child.
+        """
+        from kiro_crew.session_pid import agent_marker_in_ancestry
+
+        def env_marker(pid: int) -> bool:
+            return pid == 42  # only the parent is marked
+
+        with (
+            patch("kiro_crew.session_pid.sys") as mock_sys,
+            patch("kiro_crew.session_pid._env_has_kirocrew_marker", side_effect=env_marker),
+            patch(
+                "kiro_crew.platform_compat.get_ppid", side_effect=lambda p: 42 if p == 500 else 1
+            ),
+        ):
+            mock_sys.platform = "linux"
+            assert agent_marker_in_ancestry(500) is True
+
+    def test_no_marker_anywhere_returns_false(self) -> None:
+        from kiro_crew.session_pid import agent_marker_in_ancestry
+
+        with (
+            patch("kiro_crew.session_pid.sys") as mock_sys,
+            patch("kiro_crew.session_pid._env_has_kirocrew_marker", return_value=False),
+            patch("kiro_crew.platform_compat.get_ppid", side_effect=lambda p: max(p - 1, 1)),
+        ):
+            mock_sys.platform = "linux"
+            assert agent_marker_in_ancestry(6) is False
+
+    def test_ppid_failure_stops_walk_fail_closed(self) -> None:
+        """get_ppid returning -1 (read failure) ends the walk as False."""
+        from kiro_crew.session_pid import agent_marker_in_ancestry
+
+        with (
+            patch("kiro_crew.session_pid.sys") as mock_sys,
+            patch("kiro_crew.session_pid._env_has_kirocrew_marker", return_value=False),
+            patch("kiro_crew.platform_compat.get_ppid", return_value=-1),
+        ):
+            mock_sys.platform = "linux"
+            assert agent_marker_in_ancestry(500) is False
+
+    def test_cycle_is_guarded(self) -> None:
+        """A pathological ppid cycle terminates instead of looping forever."""
+        from kiro_crew.session_pid import agent_marker_in_ancestry
+
+        # 500 -> 600 -> 500 -> ...
+        chain = {500: 600, 600: 500}
+        with (
+            patch("kiro_crew.session_pid.sys") as mock_sys,
+            patch("kiro_crew.session_pid._env_has_kirocrew_marker", return_value=False),
+            patch("kiro_crew.platform_compat.get_ppid", side_effect=lambda p: chain.get(p, 1)),
+        ):
+            mock_sys.platform = "linux"
+            assert agent_marker_in_ancestry(500) is False
+
+    def test_marker_found_beyond_forty_hops(self) -> None:
+        """GPT finding: a marked ancestor MORE than 40 hops up must still be
+        found — the walk has no fixed hop cap that would fail open.
+
+        Builds a 100-deep chain (pid 100 → 99 → ... → 1) where ONLY pid 1's
+        parent-most marked node is at depth 60. An earlier bounded scan
+        (_ANCESTOR_MARKER_MAX_HOPS=40) returned False here, letting a deeply
+        nested agent mint an owner token; the uncapped walk finds it.
+        """
+        from kiro_crew.session_pid import agent_marker_in_ancestry
+
+        marked_pid = 40  # 60 hops above the starting pid 100
+
+        def env_marker(pid: int) -> bool:
+            return pid == marked_pid
+
+        # pid p's parent is p-1, down to init (1); a chain far deeper than 40.
+        with (
+            patch("kiro_crew.session_pid.sys") as mock_sys,
+            patch("kiro_crew.session_pid._env_has_kirocrew_marker", side_effect=env_marker),
+            patch("kiro_crew.platform_compat.get_ppid", side_effect=lambda p: p - 1),
+        ):
+            mock_sys.platform = "linux"
+            assert agent_marker_in_ancestry(100) is True
+
+    def test_deep_clean_chain_terminates_false(self) -> None:
+        """A deep UNMARKED chain still terminates at init and returns False
+        (no infinite loop now that the hop cap is gone)."""
+        from kiro_crew.session_pid import agent_marker_in_ancestry
+
+        with (
+            patch("kiro_crew.session_pid.sys") as mock_sys,
+            patch("kiro_crew.session_pid._env_has_kirocrew_marker", return_value=False),
+            patch("kiro_crew.platform_compat.get_ppid", side_effect=lambda p: p - 1),
+        ):
+            mock_sys.platform = "linux"
+            assert agent_marker_in_ancestry(500) is False
+
+
+class TestAgentSessionBlocksVaultMutation:
+    """Fail-CLOSED gate for vault mutation from an agent session."""
+
+    def test_env_marker_blocks(self) -> None:
+        from kiro_crew.constants import KIROCREW_SPAWNED_ENV, KIROCREW_SPAWNED_VALUE
+        from kiro_crew.session_pid import agent_session_blocks_vault_mutation
+
+        with patch.dict(os.environ, {KIROCREW_SPAWNED_ENV: KIROCREW_SPAWNED_VALUE}):
+            assert agent_session_blocks_vault_mutation() is True
+
+    def test_linux_marked_ancestor_blocks(self) -> None:
+        from kiro_crew.constants import KIROCREW_SPAWNED_ENV
+        from kiro_crew.session_pid import agent_session_blocks_vault_mutation
+
+        env = {k: v for k, v in os.environ.items() if k != KIROCREW_SPAWNED_ENV}
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("kiro_crew.session_pid.ancestry_inspection_supported", return_value=True),
+            patch("kiro_crew.session_pid.agent_marker_in_ancestry", return_value=True),
+        ):
+            assert agent_session_blocks_vault_mutation() is True
+
+    def test_linux_clean_ancestry_allows(self) -> None:
+        from kiro_crew.constants import KIROCREW_SPAWNED_ENV
+        from kiro_crew.session_pid import agent_session_blocks_vault_mutation
+
+        env = {k: v for k, v in os.environ.items() if k != KIROCREW_SPAWNED_ENV}
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("kiro_crew.session_pid.ancestry_inspection_supported", return_value=True),
+            patch("kiro_crew.session_pid.agent_marker_in_ancestry", return_value=False),
+        ):
+            assert agent_session_blocks_vault_mutation() is False
+
+    def test_unsupported_platform_fails_closed(self) -> None:
+        """GPT's finding: on macOS/Windows the ancestry read is unavailable, so a
+        scrubbed-env agent must NOT be allowed — the gate blocks fail-closed."""
+        from kiro_crew.constants import KIROCREW_SPAWNED_ENV
+        from kiro_crew.session_pid import agent_session_blocks_vault_mutation
+
+        env = {k: v for k, v in os.environ.items() if k != KIROCREW_SPAWNED_ENV}
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch("kiro_crew.session_pid.ancestry_inspection_supported", return_value=False),
+        ):
+            assert agent_session_blocks_vault_mutation() is True
+
+    def test_ancestry_inspection_supported_matches_platform(self) -> None:
+        from kiro_crew.session_pid import ancestry_inspection_supported
+
+        with patch("kiro_crew.session_pid.sys") as mock_sys:
+            mock_sys.platform = "linux"
+            assert ancestry_inspection_supported() is True
+            mock_sys.platform = "darwin"
+            assert ancestry_inspection_supported() is False
+            mock_sys.platform = "win32"
+            assert ancestry_inspection_supported() is False
+
+
 class TestMarkedLauncherSweepIntegration:
     """find + kill phases honor the marked-launcher positive-ID path."""
 
@@ -1393,8 +1572,7 @@ class TestIsSweepableOrphanWork:
         from kiro_crew.session_pid import _is_sweepable_orphan_work
 
         worker = (
-            b"/repo/.venv/bin/python\x00-u\x00-c"
-            b"\x00import sys;exec(eval(sys.stdin.readline()))"
+            b"/repo/.venv/bin/python\x00-u\x00-c" b"\x00import sys;exec(eval(sys.stdin.readline()))"
         )
         with (
             patch("kiro_crew.session_pid._env_has_kirocrew_marker", return_value=True),
@@ -1523,9 +1701,7 @@ class TestIsSweepableOrphanWork:
         assert _ORPHAN_WORK_MIN_AGE_SECONDS > _ORPHAN_MIN_AGE_SECONDS
         with patch("kiro_crew.session_pid._env_has_kirocrew_marker", return_value=True):
             assert (
-                _is_sweepable_orphan_work(
-                    1234, self._PYTEST_CMDLINE, _ORPHAN_MIN_AGE_SECONDS + 1
-                )
+                _is_sweepable_orphan_work(1234, self._PYTEST_CMDLINE, _ORPHAN_MIN_AGE_SECONDS + 1)
                 is False
             )
 
@@ -1542,9 +1718,7 @@ class TestIsSweepableOrphanWork:
 
         with patch("kiro_crew.session_pid._env_has_kirocrew_marker", return_value=True):
             assert (
-                _is_sweepable_orphan_work(
-                    1234, b"/usr/local/bin/kiro-cli\x00chat\x00--acp", 700.0
-                )
+                _is_sweepable_orphan_work(1234, b"/usr/local/bin/kiro-cli\x00chat\x00--acp", 700.0)
                 is False
             )
             assert _is_sweepable_orphan_work(1234, b"claude\x00--print", 700.0) is False
@@ -1933,9 +2107,7 @@ class TestPidStartTokenIdentityGuard:
         assert entry in session_pid_file.read_text(encoding="utf-8")
 
     @_POSIX_ONLY
-    def test_session_roots_subreaper_reparent_still_killed(
-        self, session_pid_file: Path
-    ) -> None:
+    def test_session_roots_subreaper_reparent_still_killed(self, session_pid_file: Path) -> None:
         """A recorded start token that MATCHES proves identity on its own.
 
         Orphans do not always reparent to init: a process placed in its own
@@ -1969,9 +2141,10 @@ class TestPidStartTokenIdentityGuard:
         ):
             cleanup_orphaned_session_roots()
 
-        assert (99998, platform_compat.SIGKILL) in kills, (
-            "a token-verified orphan adopted by a subreaper was not reaped"
-        )
+        assert (
+            99998,
+            platform_compat.SIGKILL,
+        ) in kills, "a token-verified orphan adopted by a subreaper was not reaped"
         # And it must not be silently untracked, which is what leaks it forever.
         assert entry not in session_pid_file.read_text(encoding="utf-8")
 
