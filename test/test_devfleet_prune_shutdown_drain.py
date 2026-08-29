@@ -80,7 +80,7 @@ async def _start_prune(monkeypatch, *, remove_impl):
     async def fake_find(nm):
         return {"path": f"/wt/{nm}", "branch": "feat/x"}, None
 
-    async def fake_remove(nm, *, force, progress, _caller):
+    async def fake_remove(nm, *, force, progress, _caller, discard_untracked_paths=None):
         entered.set()
         return await remove_impl()
 
@@ -212,7 +212,7 @@ async def test_cleanup_stays_pending_and_holds_lock_until_mutation_releases(monk
     async def fake_find(nm):
         return {"path": "/wt/wt-x", "branch": "feat/x"}, None
 
-    async def fake_remove(nm, *, force, progress, _caller):
+    async def fake_remove(nm, *, force, progress, _caller, discard_untracked_paths=None):
         # Mirror the production shape: hold _GIT_MUTATION_LOCK across the
         # uninterruptible destructive mutation.
         async with mod._GIT_MUTATION_LOCK:
