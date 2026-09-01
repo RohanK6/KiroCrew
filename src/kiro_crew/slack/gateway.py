@@ -218,6 +218,7 @@ from kiro_crew.platform import boot_platform
 from kiro_crew.platform.context import (
     PlatformCompositionError,
     current_context,
+    redact_log_via_context,
     redact_via_context,
     safe_context_call,
 )
@@ -5299,7 +5300,7 @@ class GatewayOrchestrator:
             if is_keep_response(result_safe):
                 logger.info(
                     "Heartbeat task incomplete, suppressing delivery: %s",
-                    redact_and_truncate(task_text, 80),
+                    redact_log_via_context(task_text)[:80],
                 )
             else:
                 task_safe = redact_and_truncate(task_text, 100)
