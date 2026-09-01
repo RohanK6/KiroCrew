@@ -230,6 +230,33 @@ class TestCronFoldersUpdate:
         assert body["code"] == "folder_save_failed"
 
 
+class TestCronFoldersRenameState:
+    """State-level rename_cron_folder behavior against a real DashboardState."""
+
+    def test_rename_persists_on_actual_change(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path, raising=False)
+        state = DashboardState.__new__(DashboardState)
+        state._cron_folders = [{"id": "f1", "name": "Old", "order": 0}]
+        with patch.object(state, "save_cron_folders") as save:
+            result = state.rename_cron_folder("f1", "New")
+        assert result["name"] == "New"
+        assert state._cron_folders[0]["name"] == "New"
+        save.assert_called_once()
+
+    def test_same_name_rename_is_a_noop_and_skips_disk_write(self, tmp_path, monkeypatch):
+        """A rename to the folder's current name must not touch disk: the
+        atomic save_cron_folders() write is skipped and the folder is
+        returned unchanged."""
+        monkeypatch.setattr("kiro_crew.dashboard.state.config_dir", lambda: tmp_path, raising=False)
+        state = DashboardState.__new__(DashboardState)
+        state._cron_folders = [{"id": "f1", "name": "Ops", "order": 0}]
+        with patch.object(state, "save_cron_folders") as save:
+            result = state.rename_cron_folder("f1", "Ops")
+        save.assert_not_called()
+        assert result == {"id": "f1", "name": "Ops", "order": 0}
+        assert state._cron_folders[0]["name"] == "Ops"
+
+
 class TestCronFoldersDelete:
     """DELETE /api/cron-folders/{folder_id} removes folder and clears assignments."""
 

@@ -6208,9 +6208,14 @@ class DashboardState:
         Returns the updated folder dict, or None if folder_id not found.
         Raises on persistence failure (callers should surface a 500);
         original name is restored on failure.
+
+        A same-name rename is a no-op: it neither mutates memory nor writes
+        to disk, so a redundant PATCH cannot cost an atomic file write.
         """
         for folder in self._cron_folders:
             if folder["id"] == folder_id:
+                if folder["name"] == name:
+                    return folder
                 old_name = folder["name"]
                 folder["name"] = name
                 try:
