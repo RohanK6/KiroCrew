@@ -19,11 +19,9 @@ from kiro_crew.config.loader import KiroCrewConfig
 from kiro_crew.config.paths import config_dir
 from kiro_crew.secrets.vault import SecretVault
 from kiro_crew.wakatime.client import DEFAULT_API_BASE, WakaTimeClient
+from kiro_crew.wakatime.constants import WAKATIME_API_KEY
 
 logger = logging.getLogger(__name__)
-
-# Credential name in the vault (the dashboard secrets store).
-WAKATIME_API_KEY = "WAKATIME_API_KEY"
 
 
 def resolve_api_key() -> str:
