@@ -8454,9 +8454,10 @@ class AcpClient:
         """Re-key this client for a different session (used by warm pool).
 
         ``crew_agent`` and ``watchdog`` exist only for signature parity with
-        AcpSessionProvider.rekey (session.py calls provider.client.rekey
-        uniformly): this client's dispatch loop carries no per-agent watchdog
-        snapshot, so both are accepted and deliberately not stored."""
+        AcpSessionProvider.rekey (session_allocation.py calls
+        provider.client.rekey uniformly): this client's dispatch loop carries no
+        per-agent watchdog snapshot, so both are accepted and deliberately not
+        stored."""
         self._session_key = session_key
         self._channel_id = channel_id
         self._last_activity = time.monotonic()

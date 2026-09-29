@@ -979,7 +979,7 @@ class _GateMixin(ManagerComponent):
             # per-agent events. Returning a throwaway sentinel (the old
             # ``q<n>``) and minting a fresh uuid on drain meant every wave member
             # after the first was announced under an id no agent ever had — with
-            # the default 2s stagger that is EVERY member after the first, so a
+            # the default 0.25s stagger that is EVERY member after the first, so a
             # 2-agent wave permanently rendered "1 agent running" while the
             # sidebar and Subagents panel correctly showed 2.
             # The in-memory queue is a bounded WINDOW over the store's queued

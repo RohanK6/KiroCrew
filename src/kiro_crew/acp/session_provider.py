@@ -846,11 +846,11 @@ class AcpSessionProvider(LLMProvider):
         watchdog: WatchdogSettings | None = None,
     ) -> None:
         """Re-key for a different session on warm-pool claim (parity with
-        AcpClient.rekey). session.py:1309 calls provider.client.rekey(...); when
-        the pooled provider is kiro-shared, provider.client is THIS class, so a
-        missing rekey() would AttributeError on claim. Stores the correlation
-        keys and refreshes runtime activity so the just-claimed process is not
-        idle-reaped.
+        AcpClient.rekey). session_allocation.py calls provider.client.rekey(...)
+        on claim; when the pooled provider is kiro-shared, provider.client is
+        THIS class, so a missing rekey() would AttributeError on claim. Stores
+        the correlation keys and refreshes runtime activity so the just-claimed
+        process is not idle-reaped.
 
         ``crew_agent`` is the claiming session's canonical crew identity: the
         pooled runtime was spawned before any crew claimed it, so both the
