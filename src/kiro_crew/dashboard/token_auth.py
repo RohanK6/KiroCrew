@@ -538,9 +538,19 @@ AGENT_HOOK_PATH = "/api/hooks/agent"
 #: is the only method whose handler carries its own credential check.
 _SELF_AUTH_WEBHOOK_METHODS = frozenset({"POST"})
 
+#: The CLI's post-update badge-revalidate route. `kirocrew update` (git checkout)
+#: POSTs here over loopback holding the local secret in X-Local-Secret and no
+#: dashboard token, exactly like /api/logout and /api/token/local; the handler
+#: (api_update_revalidate) re-checks BOTH loopback origin and the secret itself
+#: before touching the cache. Scoped to POST — the only method routed and the
+#: only one the handler's self-auth covers — so a future collision on this path
+#: under another method stays on the ordinary token gate.
+UPDATE_REVALIDATE_PATH = "/api/update/revalidate"
+
 _BYPASS_EXACT_METHODS: dict[str, frozenset[str]] = {
     AGENT_HOOK_PATH: _SELF_AUTH_WEBHOOK_METHODS,
     TEAMS_WEBHOOK_PATH: _SELF_AUTH_WEBHOOK_METHODS,
+    UPDATE_REVALIDATE_PATH: _SELF_AUTH_WEBHOOK_METHODS,
 }
 
 # Exact-path exemptions from the CSRF **Origin** check, path -> allowed methods.
