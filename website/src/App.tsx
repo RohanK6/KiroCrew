@@ -24,6 +24,7 @@ import { metricColor } from './utils/metricColor'
 import { fetchNotifications, ackNotification, armBootNotificationsFallback } from './store/notificationsSlice'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useDashboardHealthProbe } from './hooks/useDashboardHealthProbe'
+import { useConfigAutolinkRules } from './hooks/useConfigAutolinkRules'
 import { useTheme } from './hooks/useTheme'
 import { useBranding } from './hooks/useBranding'
 import { useRumPageView } from './hooks/useRumPageView'
@@ -1659,6 +1660,11 @@ export default function App() {
   // in-window navigation back to this frame instead of escaping to '/'.
   const initialPopoutPath = useRef(window.location.pathname + window.location.search).current
   const dispatch = useAppDispatch()
+  // Register the operator's link rules (dashboard.link_patterns) into the
+  // autolink registry from the shell, so every surface linkifies — not only
+  // after a chat page has rendered. Owns the registry; the chat page reuses
+  // the same ['dashboardConfig'] query for its source hosts.
+  useConfigAutolinkRules()
   // The slice also carries the slot list and the subagent maps, so selecting all of
   // it would re-render the root on dashboard traffic neither of these fields reads.
   const connected = useAppSelector(s => s.dashboard.connected)
