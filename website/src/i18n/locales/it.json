@@ -11696,7 +11696,11 @@
       "sort_filter_sessions_hidden_other": "Ordina e filtra le sessioni — {{count}} cartelle nascoste non sono mostrate",
       "show_hidden_folders_from_board_one": "{{count}} cartella nascosta non è mostrata — usa Ordina e filtra per ripristinarla.",
       "show_hidden_folders_from_board_many": "{{count}} cartelle nascoste non sono mostrate — usa Ordina e filtra per ripristinarle.",
-      "show_hidden_folders_from_board_other": "{{count}} cartelle nascoste non sono mostrate — usa Ordina e filtra per ripristinarle."
+      "show_hidden_folders_from_board_other": "{{count}} cartelle nascoste non sono mostrate — usa Ordina e filtra per ripristinarle.",
+      "source_link_actions": "Nascondi un chip PR o issue",
+      "unlink_source_link": "Seleziona un chip PR o issue per nasconderlo definitivamente in questa sessione. L’origine e la trascrizione restano invariate.",
+      "unlink_source_link_confirm": "Seleziona di nuovo per nascondere definitivamente «{{label}}»",
+      "unlink_source_link_failed": "Impossibile nascondere. Riprova."
     },
     "connectionsPage": {
       "action_failed": "Azione non riuscita: {{error}}",

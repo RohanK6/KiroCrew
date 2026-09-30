@@ -11696,7 +11696,11 @@
       "sort_filter_sessions_hidden_other": "Ordenar e filtrar sessões — {{count}} pastas ocultas não são exibidas",
       "show_hidden_folders_from_board_one": "{{count}} pasta oculta não é exibida — use Ordenar e filtrar para restaurá-la.",
       "show_hidden_folders_from_board_many": "{{count}} pastas ocultas não são exibidas — use Ordenar e filtrar para restaurá-las.",
-      "show_hidden_folders_from_board_other": "{{count}} pastas ocultas não são exibidas — use Ordenar e filtrar para restaurá-las."
+      "show_hidden_folders_from_board_other": "{{count}} pastas ocultas não são exibidas — use Ordenar e filtrar para restaurá-las.",
+      "source_link_actions": "Ocultar um chip de PR ou issue",
+      "unlink_source_link": "Selecione um chip de PR ou issue para ocultá-lo permanentemente nesta sessão. A origem e a transcrição permanecem inalteradas.",
+      "unlink_source_link_confirm": "Selecione novamente para ocultar permanentemente “{{label}}”",
+      "unlink_source_link_failed": "Não foi possível ocultar. Tente novamente."
     },
     "connectionsPage": {
       "action_failed": "Falha na ação: {{error}}",

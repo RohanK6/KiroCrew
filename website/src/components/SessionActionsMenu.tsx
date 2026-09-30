@@ -10,6 +10,7 @@ import ExportSessionItem from './ExportSessionItem'
 import ImportSessionItem from './ImportSessionItem'
 import CrewBoardMenuItem from './CrewBoardMenuItem'
 import SessionColorSwatches from './SessionColorSwatches'
+import SourceLinksSubmenu from './SourceLinksSubmenu'
 import LinkedSurfacesSection from './LinkedSurfacesSection'
 import { DropdownMenuItem, DropdownMenuSeparator } from './ui/dropdown-menu'
 import { ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
@@ -321,6 +322,7 @@ export default function SessionActionsMenu({
       // explicit mirrors can be reminded/stopped, and an otherwise-unlinked
       // dashboard session retains the existing Slack channel picker.
       <LinkedSurfacesSection key="links" slotKey={slotKey} variant={variant} />,
+      <SourceLinksSubmenu key="source-links" slotKey={slotKey} variant={variant} />,
     ],
     // Colour — its own section
     [

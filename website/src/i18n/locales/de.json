@@ -11522,7 +11522,11 @@
       "sort_filter_sessions_hidden_one": "Sitzungen sortieren & filtern — {{count}} ausgeblendeter Ordner wird nicht angezeigt",
       "sort_filter_sessions_hidden_other": "Sitzungen sortieren & filtern — {{count}} ausgeblendete Ordner werden nicht angezeigt",
       "show_hidden_folders_from_board_one": "{{count}} ausgeblendeter Ordner wird nicht angezeigt — über Sortieren & Filtern zurückholen.",
-      "show_hidden_folders_from_board_other": "{{count}} ausgeblendete Ordner werden nicht angezeigt — über Sortieren & Filtern zurückholen."
+      "show_hidden_folders_from_board_other": "{{count}} ausgeblendete Ordner werden nicht angezeigt — über Sortieren & Filtern zurückholen.",
+      "source_link_actions": "Einen PR- oder Issue-Chip ausblenden",
+      "unlink_source_link": "Wähle einen PR- oder Issue-Chip, um ihn dauerhaft aus dieser Sitzung auszublenden. Quelle und Gesprächsverlauf bleiben unverändert.",
+      "unlink_source_link_confirm": "Zum dauerhaften Ausblenden von „{{label}}“ erneut auswählen",
+      "unlink_source_link_failed": "Ausblenden fehlgeschlagen. Erneut versuchen."
     },
     "connectionsPage": {
       "action_failed": "Aktion fehlgeschlagen: {{error}}",

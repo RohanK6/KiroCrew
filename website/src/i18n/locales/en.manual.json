@@ -4955,7 +4955,11 @@
       "sort_filter_sessions_hidden_one": "Sort & filter sessions — {{count}} hidden folder not shown",
       "sort_filter_sessions_hidden_other": "Sort & filter sessions — {{count}} hidden folders not shown",
       "show_hidden_folders_from_board_one": "{{count}} hidden folder is not shown — open sort & filter to bring it back.",
-      "show_hidden_folders_from_board_other": "{{count}} hidden folders are not shown — open sort & filter to bring them back."
+      "show_hidden_folders_from_board_other": "{{count}} hidden folders are not shown — open sort & filter to bring them back.",
+      "source_link_actions": "Hide a PR or Issue chip",
+      "unlink_source_link": "Select a PR or Issue chip to permanently hide from this session. The source and transcript stay unchanged.",
+      "unlink_source_link_confirm": "Select again to permanently hide “{{label}}”",
+      "unlink_source_link_failed": "Could not hide. Try again."
     },
     "connectionsPage": {
       "action_failed": "Action failed: {{error}}",

@@ -139,6 +139,12 @@ export interface Slot {
     // What the link points at. OPTIONAL on the wire — absent means 'change', so
     // older payloads and existing fixtures keep rendering as PR/MR chips.
     kind?: 'change' | 'issue'
+    // The server-authoritative identity string this chip is keyed by, sent so
+    // the client can pass it as ``expect`` to the unlink DELETE endpoint.
+    // OPTIONAL on the wire so a bundle newer than its gateway still renders
+    // chips (they just cannot be unlinked until the gateway sends it — the
+    // affordance hides when it is absent).
+    identity?: string
   }>
   source_links_total?: number
 }

@@ -109,7 +109,7 @@ const API_KEY_ORDER = [
   'pullRequestPendingReview', 'submitPullRequestReview', 'fetchIssueSource', 'appContributors',
   'chatSlots', 'autonudgeList', 'autonudgeForSlot', 'monitorsList',
   'monitorForSlot', 'monitorCreate', 'monitorUpdate', 'monitorStop',
-  'monitorClear', 'monitorRestart', 'chatSlotSourceLinks', 'chatSlotDetail',
+  'monitorClear', 'monitorRestart', 'chatSlotSourceLinks', 'unlinkSourceLink', 'chatSlotDetail',
   'createChatSlot', 'chatSlotContext', 'deleteChatSlot', 'cleanupSessions',
   'stopChatSlot', 'stopChatSlotForce', 'cancelQueuedMessage', 'editQueuedMessage',
   'reorderQueuedMessages', 'interruptSlot', 'endWait', 'approveChatSlot',

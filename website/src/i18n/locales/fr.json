@@ -11696,7 +11696,11 @@
       "sort_filter_sessions_hidden_other": "Trier et filtrer les sessions — {{count}} dossiers masqués ne sont pas affichés",
       "show_hidden_folders_from_board_one": "{{count}} dossier masqué n'est pas affiché — utilise Trier et filtrer pour le rétablir.",
       "show_hidden_folders_from_board_many": "{{count}} dossiers masqués ne sont pas affichés — utilise Trier et filtrer pour les rétablir.",
-      "show_hidden_folders_from_board_other": "{{count}} dossiers masqués ne sont pas affichés — utilise Trier et filtrer pour les rétablir."
+      "show_hidden_folders_from_board_other": "{{count}} dossiers masqués ne sont pas affichés — utilise Trier et filtrer pour les rétablir.",
+      "source_link_actions": "Masquer une puce PR ou ticket",
+      "unlink_source_link": "Sélectionne une puce PR ou ticket pour la masquer définitivement dans cette session. La source et la transcription restent inchangées.",
+      "unlink_source_link_confirm": "Sélectionne à nouveau pour masquer définitivement « {{label}} »",
+      "unlink_source_link_failed": "Échec du masquage. Réessaie."
     },
     "connectionsPage": {
       "action_failed": "Échec de l’action : {{error}}",

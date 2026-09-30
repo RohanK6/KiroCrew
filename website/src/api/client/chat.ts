@@ -73,6 +73,19 @@ export function createChatEndpoints({ post, put, del, patch, j, sessionKeyHeader
      *  this is called. */
     chatSlotSourceLinks: (slot: string): Promise<{ links: NonNullable<ChatSlot['source_links']>; total: number }> =>
       fetch('/api/chat/slots/' + encodeURIComponent(slot) + '/source-links').then(j),
+    /** Unlink one PR/issue/Jira chip from a session. The chip is derived by
+     *  scanning the transcript, so this records the link's serialized `identity`
+     *  in a per-slot dismissed set the derivation filters against — a local UI
+     *  action that never touches the remote provider. `identity` is the opaque key
+     *  the slots payload sends on each chip; it is passed straight back.
+     *  `expect` is the session identity the chip was rendered under
+     *  (`<row_identity>|<created_at>|<linked_session_key>`, the transcript binding
+     *  being the part a rebind changes); it is REQUIRED — the backend rejects an
+     *  absent one (400) and a mismatched one (409, a same-key recreation stands in
+     *  its place), so the dismissal can never land on the wrong session. */
+    unlinkSourceLink: (slot: string, identity: string, expect: string): Promise<{ ok?: boolean; dismissed?: boolean; source_links_total?: number; error?: string; code?: string }> =>
+      del('/api/chat/slots/' + encodeURIComponent(slot) + '/source-links/' + encodeURIComponent(identity)
+        + '?expect=' + encodeURIComponent(expect)).then(j),
     chatSlotDetail: (slot: string, limit?: number, before?: number, signal?: AbortSignal) => {
       const p = new URLSearchParams()
       if (limit) p.set('limit', String(limit))

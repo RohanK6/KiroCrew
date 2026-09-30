@@ -11870,7 +11870,11 @@
       "show_hidden_folders_from_board_one": "{{count}} скрытая папка не отображается — её вернёт «Сортировка и фильтры».",
       "show_hidden_folders_from_board_few": "{{count}} скрытые папки не отображаются — их вернёт «Сортировка и фильтры».",
       "show_hidden_folders_from_board_many": "{{count}} скрытых папок не отображается — их вернёт «Сортировка и фильтры».",
-      "show_hidden_folders_from_board_other": "{{count}} скрытой папки не отображается — их вернёт «Сортировка и фильтры»."
+      "show_hidden_folders_from_board_other": "{{count}} скрытой папки не отображается — их вернёт «Сортировка и фильтры».",
+      "source_link_actions": "Скрыть чип PR или задачи",
+      "unlink_source_link": "Выбери чип PR или задачи, чтобы навсегда скрыть его в этом сеансе. Источник и история переписки останутся без изменений.",
+      "unlink_source_link_confirm": "Выбери ещё раз, чтобы навсегда скрыть «{{label}}»",
+      "unlink_source_link_failed": "Не удалось скрыть. Повтори попытку."
     },
     "connectionsPage": {
       "action_failed": "Не удалось выполнить действие: {{error}}",
