@@ -609,8 +609,14 @@ by hand. Other branches,
 `release/*` included, never auto-apply. `main` is always one minor version ahead
 of the release line, so a `main` checkout moves onto nightly code each time a
 release branch is cut. Below a policy minimum version, a primary-branch checkout
-skips the version test and resets to every new upstream commit, released or
-not.
+applies on the same newer-`__version__` test and only when the checkout can take
+the update cleanly, so a floor moves it toward a build that satisfies the minimum
+rather than resetting to every intermediate commit. When the floor is pinned
+above the newest available build, or the checkout has diverged (local commits a
+reset would discard), the gateway refreshes the update badge instead of applying.
+A mandated apply that finds the required code already on disk leaves a restart
+pending and refreshes the badge rather than reporting a restart that does not
+happen.
 
 ### Turning it off and updating by hand
 
@@ -638,7 +644,9 @@ the version the running gateway serves.
 - **A policy minimum version.** An administrator can set `min_version` in the
   `updates` block of `security_policy.json`. On an install whose gateway updates
   itself, a gateway below that version applies the update even with
-  `auto_update` off. The scope per install is in the
+  `auto_update` off — but only toward a build carrying a newer `__version__`, so
+  a floor advances the host instead of churning on commit distance alone. The
+  scope per install is in the
   [governance spec](../../../docs/system-specs/modules/governance.md#update-pins-updates--policy-only).
 - **The desktop app's own updater.** On a desktop install, the app's update
   switch on the About page is the one that stops automatic updates. It updates

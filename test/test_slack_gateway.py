@@ -1166,12 +1166,66 @@ class TestCheckForUpdates:
         orch._auto_apply_update.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_min_version_mandate_fires_even_when_not_available(self):
-        """The mandate is about THIS host, not the availability heuristic.
+    async def test_min_version_mandate_without_a_newer_build_notifies(self):
+        """A below-floor git checkout with no newer build must NOT hard-reset.
 
-        `_do_update_check`'s `_version_tuple` returns (0,) for any pre-release, so
-        a `1.4.0-nightly.<stamp>` remote reads as `available=False`. Nested inside
-        that branch, a host below a pinned 1.4.0 floor would never update.
+        The mandate is real, but `_auto_apply_update` resets hard onto the
+        upstream tip, and `update_available` is true for a checkout on any commit
+        distance — released or not. Resetting on that alone drags the checkout to
+        every intermediate commit on every cycle and at every boot without the
+        running `__version__` ever moving toward the floor. The mandatory branch
+        now reads the same `version_newer` signal the voluntary branch does, so a
+        floor with no newer build available notifies instead of resetting.
+        """
+        orch = _make_orchestrator()
+        ds = _mock_dashboard_state()
+        orch.dashboard_state = ds
+        orch._auto_apply_update = AsyncMock()
+        import kiro_crew.dashboard.handlers as _h
+        from kiro_crew.platform.update_capability import CHECK_SUCCEEDED
+
+        orig = _h._update_info.copy()
+        try:
+            # A git checkout (`can_apply`) below the floor whose check SUCCEEDED
+            # but found no newer `__version__` (version_newer False). The wheel
+            # layout's equivalent no-newer-build path is
+            # test_mandatory_wheel_no_newer_build_notifies.
+            _h._update_info.update(
+                {
+                    "update_available": False,
+                    "can_apply": True,
+                    "version_newer": False,
+                    "check_status": CHECK_SUCCEEDED,
+                }
+            )
+            with patch.object(_h, "_do_update_check", new_callable=AsyncMock):
+                with patch(
+                    "kiro_crew.platform.update_governance.update_required", return_value=True
+                ):
+                    with _install_effect("mandatory"):
+                        await orch._check_for_updates()
+            # Captured before the finally restores the pre-test cache.
+            update_available = _h._update_info["update_available"]
+            check_status = _h._update_info["check_status"]
+        finally:
+            _h._update_info.clear()
+            _h._update_info.update(orig)
+        orch._auto_apply_update.assert_not_awaited()
+        ds.push_refresh.assert_called_with("update_available")
+        # The notify path refreshes the badge but does NOT clobber the shared
+        # check cache: the verdict the check wrote (no update available, check
+        # succeeded) survives, mirroring the wheel branch.
+        assert update_available is False
+        assert check_status == CHECK_SUCCEEDED
+
+    @pytest.mark.asyncio
+    async def test_min_version_mandate_applies_when_a_newer_build_is_available(self):
+        """The floor still drives an apply, but only toward a newer build.
+
+        `version_newer` true means origin carries a build whose `__version__`
+        outranks the running one, so applying moves the host forward (toward or
+        past the floor) rather than churning. This is the half of the mandate the
+        gate preserves.
         """
         orch = _make_orchestrator()
         orch.dashboard_state = _mock_dashboard_state()
@@ -1180,13 +1234,9 @@ class TestCheckForUpdates:
 
         orig = _h._update_info.copy()
         try:
-            # A git checkout (`can_apply`) below the floor: the git auto-apply
-            # is the correct mandatory action. `_do_update_check` sets this key
-            # per layout in the real flow; it is mocked here, so the fixture
-            # states the layout explicitly. The wheel layout (no `can_apply`
-            # False) takes the notify path instead — see
-            # TestMandatoryUpdateOnWheelInstall.
-            _h._update_info.update({"update_available": False, "can_apply": True})
+            _h._update_info.update(
+                {"update_available": True, "can_apply": True, "version_newer": True}
+            )
             with patch.object(_h, "_do_update_check", new_callable=AsyncMock):
                 with patch(
                     "kiro_crew.platform.update_governance.update_required", return_value=True
@@ -1197,6 +1247,8 @@ class TestCheckForUpdates:
             _h._update_info.clear()
             _h._update_info.update(orig)
         orch._auto_apply_update.assert_awaited_once()
+        # The floor-mandated apply is marked so a no-op outcome stays visible.
+        assert orch._auto_apply_update.await_args.kwargs.get("mandatory") is True
 
     @pytest.mark.asyncio
     async def test_update_check_exception_handled(self):
@@ -3433,7 +3485,46 @@ class TestAutoApplyUpdateGitPath:
             with patch.dict("os.environ", {"KIROCREW_PROJECT_DIR": "/tmp/proj"}):
                 with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
                     await orch._auto_apply_update()
+        # A voluntary apply settles silently: it clears the bar and does not
+        # light the badge. (A "pulling" progress fires during the fetch above;
+        # the distinction from a mandatory no-diff is the final outcome.)
         ds.clear_update_progress.assert_called()
+        ds.push_refresh.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_mandatory_no_diff_is_visible_to_the_operator(self):
+        """A floor-mandated no-diff apply refreshes the badge without a restart.
+
+        Reaching the no-diff branch means the required code is already on disk
+        and a restart is what remains. The ``restarting`` step is reserved for
+        the moment the gateway is about to exec itself: it arms the SPA's reload
+        latch, which a later reconnect consumes. No exec happens here, so the step
+        must NOT be pushed — doing so would reload a tab over an unrelated
+        reconnect and leave the progress bar stuck mid-"restarting". The mandated
+        no-diff path therefore clears the bar (so it is not stuck) and refreshes
+        the badge (so the pending update stays visible), unlike the voluntary
+        no-diff path which only clears.
+        """
+        orch = _make_orchestrator()
+        ds = _mock_dashboard_state()
+        orch.dashboard_state = ds
+
+        _fake_exec = _git_exec_fake(diff_rc=0)
+
+        with patch("kiro_crew.env.is_toolbox_install", return_value=False):
+            with patch.dict("os.environ", {"KIROCREW_PROJECT_DIR": "/tmp/proj"}):
+                with patch("asyncio.create_subprocess_exec", side_effect=_fake_exec):
+                    await orch._auto_apply_update(mandatory=True)
+        # The reload latch must not be armed: no "restarting" step is pushed.
+        assert not any(
+            call.args and call.args[0] == "restarting"
+            for call in ds.push_update_progress.call_args_list
+        )
+        # The bar is cleared (not left stuck) and the badge is refreshed so the
+        # pending mandatory update stays visible — the signal that distinguishes
+        # it from the voluntary no-diff path, which does not refresh.
+        ds.clear_update_progress.assert_called()
+        ds.push_refresh.assert_called_with("update_available")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -9441,10 +9532,17 @@ class TestMandatoryUpdateOnWheelInstall:
         async def _noop_check():
             return None
 
-        # Git checkout: `can_apply` True, so the mandatory git apply runs.
+        # Git checkout (`can_apply`) below the floor WITH a newer build available
+        # (`version_newer`): the mandatory git apply runs. The no-newer-build git
+        # case is test_mandatory_git_no_newer_build_notifies below.
         handlers._update_info.clear()
         handlers._update_info.update(
-            {"update_available": True, "can_apply": True, "managed_by": "git"}
+            {
+                "update_available": True,
+                "can_apply": True,
+                "managed_by": "git",
+                "version_newer": True,
+            }
         )
         monkeypatch.setattr(handlers, "_do_update_check", _noop_check)
         monkeypatch.setattr(gov, "update_required", lambda _v: True)
@@ -9456,6 +9554,185 @@ class TestMandatoryUpdateOnWheelInstall:
         with _install_effect("mandatory"):
             await orch._check_for_updates()
         apply_called.assert_awaited_once()
+        # Marked mandatory so a no-op apply is visible rather than silent.
+        assert apply_called.await_args.kwargs.get("mandatory") is True
+
+    @pytest.mark.asyncio
+    async def test_mandatory_git_no_newer_build_notifies(self, monkeypatch):
+        """A git checkout below the floor but with NO newer build must NOT reset.
+
+        `_auto_apply_update` resets hard onto the upstream tip, and
+        `update_available` is true for a checkout on commit distance alone. A
+        floor-mandated apply that reset on that would drag the checkout to every
+        intermediate commit on every cycle and at every boot without the running
+        `__version__` ever advancing. The git branch reads `version_newer`, the
+        same signal the voluntary branch does, so no newer build means notify.
+        """
+        import kiro_crew.dashboard.handlers as handlers
+        import kiro_crew.platform.update_governance as gov
+
+        orch = _make_orchestrator()
+        ds = _mock_dashboard_state()
+        orch.dashboard_state = ds
+
+        async def _noop_check():
+            return None
+
+        handlers._update_info.clear()
+        handlers._update_info.update(
+            {
+                "update_available": True,  # commit distance only — released or not
+                "can_apply": True,
+                "managed_by": "git",
+                "version_newer": False,
+                "check_status": "succeeded",
+            }
+        )
+        monkeypatch.setattr(handlers, "_do_update_check", _noop_check)
+        monkeypatch.setattr(gov, "update_required", lambda _v: True)
+        monkeypatch.setattr(gov, "min_version", lambda: "9.9.9")
+
+        apply_called = AsyncMock()
+        monkeypatch.setattr(orch, "_auto_apply_update", apply_called)
+
+        with _install_effect("mandatory"):
+            await orch._check_for_updates()
+
+        # Must NOT reset (version not newer → would churn); must notify via the
+        # badge. The shared check cache is NOT clobbered: the verdict the check
+        # wrote survives (mirroring the wheel branch, which only refreshes).
+        apply_called.assert_not_awaited()
+        ds.push_refresh.assert_called_with("update_available")
+        assert handlers._update_info.get("check_status") == "succeeded"
+
+    @pytest.mark.asyncio
+    async def test_mandatory_git_diverged_checkout_notifies_not_resets(self, monkeypatch):
+        """A diverged below-floor checkout must notify, not hard-reset.
+
+        A checkout that pulled a version bump and then committed on top reads
+        `version_newer` true (upstream `__version__` outranks the imported one)
+        but `update_available` false (`can_fast_forward or restart_pending` is
+        false when the checkout is both ahead and behind). Resetting it would
+        discard the local commits. Requiring `update_available` as well as
+        `version_newer` keeps a diverged host on the notify path rather than
+        entering `_auto_apply_update` and relying on its late ahead-count refusal.
+        """
+        import kiro_crew.dashboard.handlers as handlers
+        import kiro_crew.platform.update_governance as gov
+
+        orch = _make_orchestrator()
+        ds = _mock_dashboard_state()
+        orch.dashboard_state = ds
+
+        async def _noop_check():
+            return None
+
+        handlers._update_info.clear()
+        handlers._update_info.update(
+            {
+                "update_available": False,  # diverged: neither ff nor restart-pending
+                "can_apply": True,
+                "managed_by": "git",
+                "version_newer": True,  # upstream version IS newer
+                "commits_ahead": 2,
+                "commits_behind": 3,
+                "check_status": "succeeded",
+            }
+        )
+        monkeypatch.setattr(handlers, "_do_update_check", _noop_check)
+        monkeypatch.setattr(gov, "update_required", lambda _v: True)
+        monkeypatch.setattr(gov, "min_version", lambda: "9.9.9")
+
+        apply_called = AsyncMock()
+        monkeypatch.setattr(orch, "_auto_apply_update", apply_called)
+
+        with _install_effect("mandatory"):
+            await orch._check_for_updates()
+
+        # version_newer alone is not enough: a diverged checkout notifies.
+        apply_called.assert_not_awaited()
+        ds.push_refresh.assert_called_with("update_available")
+
+    @pytest.mark.asyncio
+    async def test_mandatory_git_failed_check_distinct_from_no_newer_build(
+        self, monkeypatch, caplog
+    ):
+        """A failed check and a no-newer-build verdict stay distinguishable.
+
+        Both decline to reset, but a non-answer (the check could not run) must
+        not read as a compliance decision, and neither path may clobber the
+        shared cache with a fabricated `update_available=True`. The two produce
+        distinct log lines and both leave the cache verdict the check wrote
+        intact.
+        """
+        import logging
+
+        import kiro_crew.dashboard.handlers as handlers
+        import kiro_crew.platform.update_governance as gov
+
+        async def _noop_check():
+            return None
+
+        monkeypatch.setattr(handlers, "_do_update_check", _noop_check)
+        monkeypatch.setattr(gov, "update_required", lambda _v: True)
+        monkeypatch.setattr(gov, "min_version", lambda: "9.9.9")
+
+        # Case A: the check FAILED (non-answer). Log must say the check did not
+        # succeed; cache verdict (failed, not available) must survive.
+        orch_a = _make_orchestrator()
+        orch_a.dashboard_state = _mock_dashboard_state()
+        apply_a = AsyncMock()
+        monkeypatch.setattr(orch_a, "_auto_apply_update", apply_a)
+        handlers._update_info.clear()
+        handlers._update_info.update(
+            {
+                "update_available": False,
+                "can_apply": True,
+                "managed_by": "git",
+                "version_newer": False,
+                "check_status": "failed",
+            }
+        )
+        with caplog.at_level(logging.WARNING):
+            caplog.clear()
+            with _install_effect("mandatory"):
+                await orch_a._check_for_updates()
+            failed_logged = "did not succeed" in caplog.text
+        failed_cache = dict(handlers._update_info)
+
+        # Case B: the check SUCCEEDED but nothing newer. A different log line;
+        # cache verdict (succeeded, not available) survives.
+        orch_b = _make_orchestrator()
+        orch_b.dashboard_state = _mock_dashboard_state()
+        apply_b = AsyncMock()
+        monkeypatch.setattr(orch_b, "_auto_apply_update", apply_b)
+        handlers._update_info.clear()
+        handlers._update_info.update(
+            {
+                "update_available": True,  # commit distance only
+                "can_apply": True,
+                "managed_by": "git",
+                "version_newer": False,
+                "check_status": "succeeded",
+            }
+        )
+        with caplog.at_level(logging.WARNING):
+            caplog.clear()
+            with _install_effect("mandatory"):
+                await orch_b._check_for_updates()
+            no_newer_logged = "no newer build is cleanly applicable" in caplog.text
+        succeeded_cache = dict(handlers._update_info)
+
+        # Neither path resets.
+        apply_a.assert_not_awaited()
+        apply_b.assert_not_awaited()
+        # The two log lines are distinct and each matches its case.
+        assert failed_logged
+        assert no_newer_logged
+        # Neither path clobbers the shared cache's own verdict.
+        assert failed_cache.get("check_status") == "failed"
+        assert failed_cache.get("update_available") is False
+        assert succeeded_cache.get("check_status") == "succeeded"
 
 
 # ─── Channel skip-reason warning on the PRODUCTION start path ──

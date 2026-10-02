@@ -11028,6 +11028,56 @@ class GatewayOrchestrator:
                 #     backend must not drive a git reset on a non-git tree nor show
                 #     an inapplicable CLI-update badge.
                 if effect.effect == AUTO_EFFECT_MANDATORY and effect.route == AUTO_ROUTE_GIT:
+                    # Apply only when a newer build is available AND the checkout
+                    # can take it cleanly — not on commit distance alone, and not
+                    # over local divergence. `_auto_apply_update` resets hard onto
+                    # the upstream tip, so the gate is two signals the successful
+                    # check already computed:
+                    #   * `version_newer` — the target's `__version__` outranks the
+                    #     one this process imported. The same signal the voluntary
+                    #     git branch below reads. Without it a primary-branch
+                    #     checkout below the floor is reset to every intermediate
+                    #     commit on every cycle and at every boot until `__version__`
+                    #     meets the floor, which never advances the imported version
+                    #     one commit at a time.
+                    #   * `update_available` — `can_fast_forward or restart_pending`
+                    #     (behind-only, or already pulled and awaiting a restart). A
+                    #     DIVERGED checkout (ahead and behind) reads `version_newer`
+                    #     true but `update_available` false, and resetting it would
+                    #     discard the local commits. The destructive step has its
+                    #     own ahead-count refusal, but gating here keeps a diverged
+                    #     host on the clean notify path instead of a fetch-then-bail.
+                    # A floor above the newest build, or a diverged checkout, then
+                    # notifies rather than churning — the wheel branch's
+                    # no-newer-build guard is the same stop.
+                    if not (info.get("version_newer") and info.get("update_available")):
+                        # Keep a FAILED/unparseable check distinct from a healthy
+                        # "nothing newer / diverged" verdict: a non-answer must not
+                        # read as a compliance decision in the log. Either way, do
+                        # NOT write `update_available` into the shared check cache —
+                        # the wheel branch this mirrors only refreshes the badge, and
+                        # a write here would overwrite the real verdict (a failed or
+                        # diverged check) with a fabricated "update available".
+                        if info.get("check_status") != CHECK_SUCCEEDED:
+                            logger.warning(
+                                "Version compliance: running %s is below the policy minimum "
+                                "%s, but the update check did not succeed (status %s) — "
+                                "notifying, not resetting",
+                                _running_version,
+                                min_version(),
+                                info.get("check_status") or CHECK_UNCHECKED,
+                            )
+                        else:
+                            logger.warning(
+                                "Version compliance: running %s is below the policy minimum "
+                                "%s, but no newer build is cleanly applicable — notifying, "
+                                "not resetting to every upstream commit",
+                                _running_version,
+                                min_version(),
+                            )
+                        if self.dashboard_state:
+                            self.dashboard_state.push_refresh("update_available")
+                        return
                     if not await self._prepare_auto_update_apply(
                         mandatory=True,
                         mandatory_key=mandatory_target_key,
@@ -11040,7 +11090,7 @@ class GatewayOrchestrator:
                             _running_version,
                             min_version(),
                         )
-                        await self._auto_apply_update()
+                        await self._auto_apply_update(mandatory=True)
                     finally:
                         await self._finish_auto_update_apply()
                     return
@@ -11218,12 +11268,19 @@ class GatewayOrchestrator:
         except Exception:
             logger.debug("Update check failed", exc_info=True)
 
-    async def _auto_apply_update(self) -> None:
+    async def _auto_apply_update(self, *, mandatory: bool = False) -> None:
         """Auto-apply: fetch, reset to remote, rebuild frontend, pip install, restart.
 
         Uses ``git fetch`` + ``git reset --hard`` instead of ``git pull``
         so local tracked-file edits never cause merge conflicts.
         Untracked files (task specs, notes) are untouched by reset.
+
+        ``mandatory`` says a policy ``min_version`` floor drove this apply rather
+        than the voluntary auto-update path. It changes nothing about the git
+        work; it only makes a no-op outcome VISIBLE to the operator. A voluntary
+        apply that finds no diff can settle silently, but a floor-mandated apply
+        that finds nothing to do means the host is below the floor AND cannot move
+        — the operator needs to see that, not a cleared progress bar.
 
         The public OSS flow is the same one used by ``kirocrew update`` and the
         dashboard update endpoint: git reset to origin → build + stage the
@@ -11465,9 +11522,29 @@ class GatewayOrchestrator:
                 await _kill_and_reap(diff_proc)
                 raise
             if diff_proc.returncode == 0:
-                # No diff — already up to date
+                # No diff — the working tree already matches the fetched tip. A
+                # MANDATED apply reaches this only once the gate upstream has
+                # confirmed a newer ``__version__`` is available, so an identical
+                # tree means the code is already in place and this process is
+                # still running the build from before it; a restart is what
+                # remains. The ``restarting`` step is reserved for the moment the
+                # gateway is about to exec itself: it arms the SPA's reload latch
+                # (``bundleReload.ts``), which the next reconnect consumes to
+                # reload the tab. No exec happens here, so pushing it would arm a
+                # latch that reloads over an unrelated later reconnect and leave
+                # the progress bar stuck mid-"restarting". Clear the bar and
+                # refresh the update badge instead — the badge is the same signal
+                # the no-newer-build notify path raises, and it surfaces the
+                # pending mandatory update without faking a restart.
                 if self.dashboard_state:
                     self.dashboard_state.clear_update_progress()
+                    if mandatory:
+                        self.dashboard_state.push_refresh("update_available")
+                if mandatory:
+                    logger.warning(
+                        "Version compliance: a mandatory update found the fetched tip "
+                        "already checked out — a restart is pending to run it"
+                    )
                 return
 
             # LAST-MOMENT REVALIDATION, after the fetch and immediately before the

@@ -259,10 +259,15 @@ pins ride in the policy file for it:
   `_check_for_updates_via_provider`):
   - **A policy provider** (`check_command` below) applies whenever the check
     reports a version.
-  - **A git checkout** on a primary branch applies, and below the floor it skips
-    the voluntary path's `version_newer` gate, so it resets to every new upstream
-    commit, released or not ([#15796](https://github.com/kirodotdev/KiroCrew/issues/15796)). A non-primary branch never
-    applies, floor or not.
+  - **A git checkout** on a primary branch applies only toward a build whose
+    `__version__` outranks the running one AND that the checkout can take
+    cleanly (behind-only, or already pulled and awaiting a restart). Below the
+    floor with nothing newer, or with a diverged checkout that a reset would
+    strip of local commits, it notifies and refreshes the badge instead of
+    resetting to every new upstream commit, released or not
+    ([#15796](https://github.com/kirodotdev/KiroCrew/issues/15796)). A no-op
+    apply (the required code already on disk) leaves a restart pending without
+    arming a reload. A non-primary branch never applies, floor or not.
   - **The `cli.sh` managed venv** re-runs the installer when the feed has a
     newer build that `source` permits. With nothing newer it writes a log line
     and does not reinstall; About can still read "up to date".
