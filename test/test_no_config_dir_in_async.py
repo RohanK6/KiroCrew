@@ -55,6 +55,7 @@ _ASYNC_CHECKED_FILES = [
     "dashboard/chat_turn/queue_drain.py",
     "dashboard/chat_turn/recipient.py",
     "dashboard/chat_turn/recovery.py",
+    "dashboard/chat_turn/regenerate_swap.py",
     "dashboard/chat_turn/session_reset.py",
     "dashboard/chat_turn/slash_commands.py",
     "dashboard/chat_turn/tool_approval.py",

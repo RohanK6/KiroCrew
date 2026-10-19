@@ -73,6 +73,7 @@ _OWNER_MODULES = frozenset(
         "queue_drain",
         "recipient",
         "recovery",
+        "regenerate_swap",
         "segment_flush",
         "session_reset",
         "slash_commands",

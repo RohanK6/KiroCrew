@@ -753,7 +753,7 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
   const {
     lastTextIdx, regenerating, setRegenerating, handleRegenerate,
   } = useRegenerate({
-    dispatch, activeSlot, messages, slotRunning, activeSlotRemoteBound, isStreaming, setRefusedPress, showRefusedPress,
+    activeSlot, messages, slotRunning, activeSlotRemoteBound, isStreaming, setRefusedPress, showRefusedPress,
   })
 
   // ---- Continue the thread ---------------------------------------------------

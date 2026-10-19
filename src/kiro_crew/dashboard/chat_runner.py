@@ -377,6 +377,10 @@ from kiro_crew.dashboard.chat_turn.recovery import (  # noqa: F401
     _turn_retry_outcomes,
     refusal_card_text,
 )
+from kiro_crew.dashboard.chat_turn.regenerate_swap import (  # noqa: F401
+    RegenerateTarget,
+    rows_before_regenerate_target,
+)
 from kiro_crew.dashboard.chat_turn.segment_flush import (
     _accumulate_segment_raw,
     _append_command_reply,
@@ -547,6 +551,7 @@ from kiro_crew.dashboard.chat_utils import (  # noqa: F401
     tighten_live_slot_memory_mode,
     tighten_replacement_to_restricted_original,
     user_text_span,
+    variant_from_row,
     with_bounded_redaction_records,
 )
 from kiro_crew.dashboard.handlers import (
@@ -3683,9 +3688,12 @@ async def _run_chat(
         # `durable_row_count` is the SHARED counting rule every
         # site that sets or advances that base uses, so the ordinal cannot disagree
         # with the base about which rows are durable.
+        # A Regenerate leaves the reply it replaces in the window until the turn
+        # ends; that reply is not counted, so the re-run draws the ordinal of the
+        # turn it repeats and the emitter's `attempt` increments.
         _crew_log_turn_no = int(
             getattr(slot, "_disk_older_durable_count", 0) or 0
-        ) + durable_row_count(slot.messages)
+        ) + durable_row_count(rows_before_regenerate_target(slot, slot.messages))
         turn._crew_log_turn_no = _crew_log_turn_no
         # A quick prompt is a REPLACING expansion, the same class as @prompt: the
         # instruction the model receives is injected content, not the user's typing,
@@ -4566,10 +4574,11 @@ async def _run_chat(
         # messages for the stats attach, which is a different question from which
         # turn this is. The two were already decoupled once, for the stats bug.
         #
-        # Regenerate and rewind keep their retry semantics for free. Both truncate
-        # the window before dispatching, so this expression returns the ordinal of
-        # the turn being re-run and the emitter's `attempt` increments -- no ordinal
-        # has to be threaded through either path.
+        # Rewind keeps its retry semantics for free: it truncates the window before
+        # dispatching, so this expression returns the ordinal of the turn being
+        # re-run and the emitter's `attempt` increments. Regenerate keeps the
+        # previous reply live until its turn ends, so the ordinal is computed
+        # without it (``rows_before_regenerate_target``) to the same effect.
         # `durable_row_count` is the SHARED counting rule every site that sets or
         # advances that base uses, so the ordinal cannot disagree with the base
         # about which rows are durable. It is resolved ONCE, above the @prompt
