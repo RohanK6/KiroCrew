@@ -373,6 +373,12 @@ export default function NotificationBanner({ bellRef, popoverOpen, onOpenNote }:
       aria-live={anyCritical ? 'assertive' : 'polite'}
       data-testid="notification-banner-region"
       data-banner-count={pending.length}
+      // While a card is pending this region's document handler dismisses the
+      // topmost card on Escape (without preventDefault), so mark it the Escape
+      // owner: the composer's Escape-to-stop gate reads this and yields, so one
+      // Escape dismisses the card without also stopping the running turn
+      // (chat-input/escapeOwners.ts, #22315).
+      {...(pending.length > 0 ? { 'data-escape-owner': '' } : {})}
       className={`fixed z-[59] pointer-events-none top-safe-offset-[50px] ${isMobile ? 'left-safe-offset-3 right-safe-offset-3' : 'right-safe-offset-3 w-[340px]'}`}
     >
       <div

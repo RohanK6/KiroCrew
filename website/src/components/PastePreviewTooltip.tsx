@@ -18,6 +18,11 @@ interface Props {
    *  prefix so a sent chip and a composer token with the same seq never collide
    *  under one test id. */
   testIdPrefix?: string
+  /** Mark the open tooltip `data-escape-owner`. Set by callers whose own Escape
+   *  handler dismisses this preview (PasteHoverLayer, PastedChip) so the
+   *  composer's Escape-to-stop gate yields and one Escape does not both close
+   *  the preview AND stop the running turn (chat-input/escapeOwners.ts, #22315). */
+  escapeOwner?: boolean
 }
 
 /**
@@ -30,7 +35,7 @@ interface Props {
  * anchor computation stay with each caller, whose trigger semantics differ (a
  * real <button> chip vs. the textarea's caret/hover).
  */
-export default function PastePreviewTooltip({ open, panelId, anchor, content, seq, testIdPrefix = 'paste-preview' }: Props) {
+export default function PastePreviewTooltip({ open, panelId, anchor, content, seq, testIdPrefix = 'paste-preview', escapeOwner = false }: Props) {
   const previewLines = content.split('\n')
   const truncated = previewLines.length > PREVIEW_MAX_LINES
   const previewText = previewLines.slice(0, PREVIEW_MAX_LINES).join('\n')
@@ -44,6 +49,7 @@ export default function PastePreviewTooltip({ open, panelId, anchor, content, se
           id={panelId}
           role="tooltip"
           data-testid={`${testIdPrefix}-${seq}`}
+          {...(escapeOwner ? { 'data-escape-owner': '' } : {})}
           initial={{ opacity: 0, y: anchor.below ? 2 : -2 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0 }}

@@ -214,6 +214,7 @@ const PasteHoverLayer = forwardRef<PasteHoverHandle, Props>(function PasteHoverL
       content={hovered ? hovered.content : ''}
       seq={hovered ? hovered.seq : 0}
       testIdPrefix="composer-paste-preview"
+      escapeOwner
     />
   </OverlayPortal>
 })
