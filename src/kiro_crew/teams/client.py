@@ -864,6 +864,14 @@ class TeamsClient:
             )
             return web.Response(status=200)
 
+        # Re-check closed AFTER every processing await (JWT verify, body read):
+        # a request that passed the entry guard can still be mid-flight when the
+        # client closes on a credential removal, and it is not yet in
+        # ``_handler_tasks`` so ``close()``'s cancel sweep cannot reach it.
+        # Without this recheck it would create and register the turn after close,
+        # running an agent turn for an allow-listed sender on a revoked channel.
+        if self._closed:
+            return web.Response(status=503, text="Teams channel is not running")
         task = asyncio.create_task(self._dispatch_activity(activity, claims))
         self._handler_tasks.add(task)
         task.add_done_callback(self._handler_tasks.discard)

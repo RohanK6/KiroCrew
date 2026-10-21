@@ -28,6 +28,7 @@ from unittest.mock import patch
 
 import pytest
 
+from conftest import forget_env_at_teardown
 from kiro_crew.config import live
 from kiro_crew.config.live import ConfigWatch
 from kiro_crew.config.loader import KiroCrewConfig
@@ -378,6 +379,9 @@ class TestLoaderCredentialHelpers:
         # record (the GPT/Opus multi-key finding); a comma separator is legal.
         monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
         monkeypatch.delenv("DISCORD_BOT_TOKEN", raising=False)
+        # serialize writes the re-exec marker into os.environ; the adopt below
+        # deletes it, but record teardown so a mid-test failure cannot leak it.
+        forget_env_at_teardown(monkeypatch, loader._ENV_OWNED_KEYS_REEXEC_MARKER)
         _write_env(home, "TELEGRAM_BOT_TOKEN=tok\nDISCORD_BOT_TOKEN=dtok\n")
         # First boot: .env writes both absent keys -> both owned.
         KiroCrewConfig.load().load_credentials()
@@ -508,8 +512,10 @@ class TestLoaderCredentialHelpers:
 
         # _env_name_key reads platform_compat.IS_WINDOWS at call time.
         monkeypatch.setattr(platform_compat, "IS_WINDOWS", True, raising=False)
-        monkeypatch.delenv("https_proxy", raising=False)
-        monkeypatch.delenv("HTTPS_PROXY", raising=False)
+        # The code under test writes HTTPS_PROXY via os.environ[...] (not through
+        # monkeypatch), so record the pre-test state for teardown or it leaks
+        # into the xdist worker for every later test.
+        forget_env_at_teardown(monkeypatch, "https_proxy", "HTTPS_PROXY")
 
         # Boot owned the lowercase key; the live edit renames it to uppercase.
         loader.note_env_owned_key("https_proxy")
@@ -569,7 +575,10 @@ class TestLoaderCredentialHelpers:
 
         monkeypatch.setenv("_KIROCREW_CREDS_SCRUBBED", "1")
         monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-        monkeypatch.delenv("MY_PROXY", raising=False)
+        # The code under test writes MY_PROXY via os.environ[...] (not through
+        # monkeypatch), so record the pre-test state for teardown or it leaks
+        # into the xdist worker for every later test.
+        forget_env_at_teardown(monkeypatch, "MY_PROXY")
         loader.apply_env_credential_changes(
             {"TELEGRAM_BOT_TOKEN", "MY_PROXY"},
             {"TELEGRAM_BOT_TOKEN": "secret", "MY_PROXY": "http://p"},

@@ -2768,7 +2768,11 @@ clears that handler when it closes Teams — otherwise a credential removal that
 closed the client would leave the route running turns for authenticated,
 allow-listed senders; the route handler already answers 503 when the handler is
 unset. As defence in depth the `TeamsClient` itself answers 503 from
-`on_activity` once closed, before any validation or dispatch.
+`on_activity` once closed — both at entry AND rechecked after the
+request-processing awaits (JWT verify, body read), immediately before the turn
+task is created and registered, since a request already past the entry guard is
+not yet in the cancel sweep's `_handler_tasks` and would otherwise start a turn
+on a just-closed channel.
 
 ### The applier registry
 
