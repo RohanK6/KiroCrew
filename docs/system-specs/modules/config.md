@@ -2754,6 +2754,22 @@ restart path, so a Slack token changed in `.env` logs a restart-needed notice to
 the operator (the same honest fallback as `slack.command`) rather than being
 silently ignored.
 
+`changed_credential_keys` matches by the canonical environment-entry name, the
+same case-fold the apply side uses: on Windows a `.env` key whose case differs
+from the declared credential constant addresses the same token, so matching the
+literal case would miss a rotation and restart nothing; the match canonicalizes
+both sides and returns the declared constant the restart path expects. On POSIX
+the canonical form is the name itself, so matching is unchanged.
+
+Closing a channel clears what outlives its client. Teams is the case: its
+inbound webhook ROUTE is pre-registered once and survives every client close,
+dispatching to the late-bound `state.teams_on_activity`. So `_close_channel_locked`
+clears that handler when it closes Teams — otherwise a credential removal that
+closed the client would leave the route running turns for authenticated,
+allow-listed senders; the route handler already answers 503 when the handler is
+unset. As defence in depth the `TeamsClient` itself answers 503 from
+`on_activity` once closed, before any validation or dispatch.
+
 ### The applier registry
 
 `live.subscribe(*prefixes, callback=..., name=...)` is the only sanctioned place

@@ -164,12 +164,24 @@ def changed_credential_keys(
     tenant-only edit restarts Teams even though the tenant is not a readiness
     credential. A channel with no credentials (iMessage, WhatsApp) never
     matches. Empty means no credential this channel needs changed.
+
+    Matching is by canonical environment-entry name: on Windows ``os.environ``
+    is case-insensitive, so a ``.env`` key whose case differs from the declared
+    credential constant (``telegram_bot_token`` vs ``TELEGRAM_BOT_TOKEN``)
+    addresses the same token the transport authenticates with; matching its
+    literal case against the constant would miss the rotation and never restart
+    the channel. The returned keys are the DECLARED constants, so the restart
+    path downstream still sees the canonical names. On POSIX the canonical form
+    is the name itself, so behaviour is unchanged.
     """
     from kiro_crew.config.live import CREDENTIAL_CHANGE_PREFIX
+    from kiro_crew.config.loader import _env_name_key
 
     prefix = CREDENTIAL_CHANGE_PREFIX + "."
-    keys = {p[len(prefix) :] for p in changed_paths if p.startswith(prefix)}
-    return frozenset(keys & (set(desc.credentials) | set(desc.restart_credentials)))
+    changed = {p[len(prefix) :] for p in changed_paths if p.startswith(prefix)}
+    changed_canon = {_env_name_key(k) for k in changed}
+    declared = set(desc.credentials) | set(desc.restart_credentials)
+    return frozenset(k for k in declared if _env_name_key(k) in changed_canon)
 
 
 async def start_channels(

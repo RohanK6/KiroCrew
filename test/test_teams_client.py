@@ -164,6 +164,22 @@ class TestInboundWebhook:
         assert seen == []
 
     @pytest.mark.asyncio
+    async def test_a_closed_client_refuses_with_503_before_any_processing(self) -> None:
+        """The webhook route is pre-registered and outlives the client, so a
+        client closed by a credential removal must not keep running turns. It
+        refuses with 503 BEFORE validating or dispatching -- even a valid,
+        would-be-authorized activity. (Fixes the GPT Teams-after-removal finding;
+        the host also clears state.teams_on_activity on close.)"""
+        c = _client_with_validator(accept=True)
+        seen: list[TeamsInbound] = []
+        c.set_message_handler(lambda inb: seen.append(inb) or asyncio.sleep(0))
+        c._closed = True
+        resp = await c.on_activity(_FakeRequest({"Authorization": "Bearer ok"}, _msg_activity()))
+        assert resp.status == 503
+        await asyncio.sleep(0)
+        assert seen == [], "a closed client dispatches no turn"
+
+    @pytest.mark.asyncio
     async def test_invalid_token_401_is_audited(self) -> None:
         # Regression (CWE-778 / SEC-E9FBAC19): a failed inbound-token attempt on
         # this external, cookie-auth-exempt surface MUST emit a structured SEL

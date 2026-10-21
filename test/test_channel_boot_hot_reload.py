@@ -1334,6 +1334,68 @@ class TestChangedCredentialKeys:
         assert "MICROSOFT_APP_TENANT_ID" not in teams.credentials
         assert "MICROSOFT_APP_TENANT_ID" in teams.restart_credentials
 
+    def test_matching_is_case_insensitive_on_windows(self, monkeypatch):
+        """On Windows os.environ is case-insensitive, so a .env credential key
+        whose case differs from the declared constant still addresses the same
+        token; the matcher must canonicalize both sides or a rotation dispatched
+        under the other case would restart nothing. The returned key stays the
+        declared constant. (Fixes the GPT Windows credential-match finding.)"""
+        from kiro_crew import platform_compat
+
+        tele = next(d for d in builtin_channel_descriptors() if d.channel_type == "telegram")
+        # POSIX (case-sensitive): a lowercase path does NOT match.
+        monkeypatch.setattr(platform_compat, "IS_WINDOWS", False, raising=False)
+        assert (
+            registry.changed_credential_keys(tele, {"credentials.telegram_bot_token"})
+            == frozenset()
+        )
+        # Windows (case-insensitive): it matches, returning the declared constant.
+        monkeypatch.setattr(platform_compat, "IS_WINDOWS", True, raising=False)
+        assert registry.changed_credential_keys(
+            tele, {"credentials.telegram_bot_token"}
+        ) == frozenset({"TELEGRAM_BOT_TOKEN"})
+
+
+class TestTeamsCloseClearsWebhookHandler:
+    def test_closing_teams_clears_the_late_bound_webhook_handler(self):
+        """Teams' inbound webhook route is pre-registered and outlives the client,
+        dispatching to the late-bound state.teams_on_activity. Closing the Teams
+        client (e.g. on a credential removal) must clear that handler, or the
+        route would keep running turns for a closed client. The route handler
+        already 503s when the handler is None. (Fixes the GPT Teams-after-removal
+        finding.)"""
+        orch = _make_orchestrator()
+        orch._channel_transports_started = True
+        orch.dashboard_state = SimpleNamespace(
+            channel_transports={}, teams_on_activity=lambda request: None
+        )
+        orch._channel_handles["teams"] = FakeClient(FakeTransport([]))
+
+        async def run():
+            async with orch._channel_restart_lock:
+                await orch._close_channel_locked("teams")
+
+        asyncio.run(run())
+        assert (
+            orch.dashboard_state.teams_on_activity is None
+        ), "the late-bound Teams webhook handler must be cleared on close"
+
+    def test_closing_a_non_teams_channel_leaves_the_teams_handler_alone(self):
+        """Only closing Teams clears teams_on_activity; a sibling channel's close
+        must not touch it."""
+        orch = _make_orchestrator()
+        orch._channel_transports_started = True
+        sentinel = lambda request: None  # noqa: E731
+        orch.dashboard_state = SimpleNamespace(channel_transports={}, teams_on_activity=sentinel)
+        orch._channel_handles["discord"] = FakeClient(FakeTransport([]))
+
+        async def run():
+            async with orch._channel_restart_lock:
+                await orch._close_channel_locked("discord")
+
+        asyncio.run(run())
+        assert orch.dashboard_state.teams_on_activity is sentinel
+
 
 class TestCredentialChangeRestartsChannel:
     def _orch_with_recorder(self, monkeypatch):

@@ -770,6 +770,7 @@ if TYPE_CHECKING:  # every owner-defined name this module forwards, for type che
         EnvFileWideEncodingError,
         _boot_raw_env,
         _boot_raw_env_lock,
+        _env_name_key,
         _env_owned_keys,
         _env_owned_keys_lock,
         _is_env_credential_key,

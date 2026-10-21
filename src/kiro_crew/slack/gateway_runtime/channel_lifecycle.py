@@ -552,6 +552,16 @@ async def _close_channel_locked(self: GatewayOrchestrator, channel_type: str) ->
                     exc_info=True,
                 )
     setattr(self, f"_{channel_type}_client", None)
+    # Teams' inbound webhook route is pre-registered and OUTLIVES the client: it
+    # dispatches to the late-bound ``state.teams_on_activity``, so a closed Teams
+    # client whose handler stays bound would keep validating and running turns
+    # for authenticated, allow-listed senders after its credential was removed.
+    # Clear the late-bound handler on close so the route has nothing to call
+    # until a restart rebinds it (the client itself also 503s once closed).
+    if channel_type == "teams":
+        state = getattr(self, "dashboard_state", None)
+        if state is not None and getattr(state, "teams_on_activity", None) is not None:
+            state.teams_on_activity = None
     self._channel_restart_gen[channel_type] = self._channel_restart_gen.get(channel_type, 0) + 1
 
 

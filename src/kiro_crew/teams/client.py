@@ -765,7 +765,17 @@ class TeamsClient:
         Validates the bearer token (401 on failure) BEFORE processing, parses
         the Activity (400 on malformed), fast-acks with 200, and runs the turn
         in a background task so a long turn never times out the POST.
+
+        A CLOSED client refuses with 503 before any processing: the webhook
+        route is pre-registered and outlives the client, so a credential removal
+        that closes this client (``restart_channel`` leaving Teams
+        uncredentialed) must not keep running turns for authenticated,
+        allow-listed senders. The host also clears ``state.teams_on_activity``
+        on close, so this is defence in depth for a request already dispatched
+        to this bound method.
         """
+        if self._closed:
+            return web.Response(status=503, text="Teams channel is not running")
         auth = request.headers.get("Authorization", "")
         token = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
         # request.remote is the peer IP when present (real aiohttp request); the
