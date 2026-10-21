@@ -2675,7 +2675,13 @@ deliberately NOT the test: an inherited credential that merely equals the `.env`
 line would otherwise be deleted when the `.env` line goes away, disabling a
 channel whose service-supplied credential should remain. The ownership record is
 home-derived boot state, so the integration second-boot harness resets it
-between boots, the same as the boot `.env` baseline. Because an in-app restart
+between boots, the same as the boot `.env` baseline. Ownership and removal are
+keyed by the canonical `os.environ` ENTRY — the name case-folded on Windows,
+where `os.environ` is case-insensitive, and the name itself on POSIX. So a
+case-only `.env` rename (`https_proxy` -> `HTTPS_PROXY`), which the diff sees as
+one key added and one removed, does not let the removal pop the entry the
+addition just wrote: a removed key is skipped when another key in the same batch
+writes its entry, and ownership follows the entry rather than the exact case. Because an in-app restart
 (`os.execv`) keeps `os.environ` but resets this process's Python state, the
 record would be empty on the successor and every `.env` key would read as
 inherited — so the `reexec_*` seams serialise it into an environment marker

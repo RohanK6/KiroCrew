@@ -498,6 +498,33 @@ class TestLoaderCredentialHelpers:
             os.environ["TELEGRAM_BOT_TOKEN"] == "before"
         ), "no key may be written when the batch is rejected"
 
+    def test_a_windows_case_only_rename_does_not_delete_the_renamed_entry(self, monkeypatch):
+        """On Windows os.environ is case-insensitive, so a case-only .env rename
+        (``https_proxy`` -> ``HTTPS_PROXY``) is one key added and one removed that
+        share the SAME entry. The removal must NOT pop the entry the addition
+        just wrote. (Fixes the GPT Windows case-rename finding.)"""
+        from kiro_crew import platform_compat
+        from kiro_crew.config import loader
+
+        # _env_name_key reads platform_compat.IS_WINDOWS at call time.
+        monkeypatch.setattr(platform_compat, "IS_WINDOWS", True, raising=False)
+        monkeypatch.delenv("https_proxy", raising=False)
+        monkeypatch.delenv("HTTPS_PROXY", raising=False)
+
+        # Boot owned the lowercase key; the live edit renames it to uppercase.
+        loader.note_env_owned_key("https_proxy")
+        loader.apply_env_credential_changes(
+            {"HTTPS_PROXY", "https_proxy"},
+            {"HTTPS_PROXY": "http://proxy:8080"},  # lowercase dropped from new
+            {"https_proxy": "http://proxy:8080"},
+        )
+        # The renamed entry survives; the removed-case key did not delete it.
+        assert os.environ.get("HTTPS_PROXY") == "http://proxy:8080"
+        # Ownership follows the canonical entry (case-folded on Windows), so a
+        # later removal of either case still recognises it.
+        assert loader.env_owns_key("https_proxy")
+        assert loader.env_owns_key("HTTPS_PROXY")
+
     def test_apply_rejects_a_nul_bearing_value_before_mutating(self, monkeypatch):
         """A NUL in a VALUE (not just the key) is also something os.environ
         rejects, so the batch must be refused before any key is written -- a

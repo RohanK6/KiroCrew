@@ -379,21 +379,30 @@ _env_owned_keys_lock = threading.Lock()
 
 
 def note_env_owned_key(key: str) -> None:
-    """Record that ``.env`` propagation wrote *key* into ``os.environ``."""
+    """Record that ``.env`` propagation wrote *key* into ``os.environ``.
+
+    Stored by canonical entry key (case-folded on Windows), so ownership tracks
+    the ``os.environ`` ENTRY rather than the exact case ``.env`` happened to
+    use -- a later removal under a different case still recognises its own entry.
+    """
     with _env_owned_keys_lock:
-        _env_owned_keys.add(key)
+        _env_owned_keys.add(_env_name_key(key))
 
 
 def discard_env_owned_key(key: str) -> None:
     """Drop *key* from the set of values ``.env`` owns (a removed or inherited key)."""
     with _env_owned_keys_lock:
-        _env_owned_keys.discard(key)
+        _env_owned_keys.discard(_env_name_key(key))
 
 
 def env_owns_key(key: str) -> bool:
-    """Whether ``.env`` propagation is what put *key* in ``os.environ``."""
+    """Whether ``.env`` propagation is what put *key* in ``os.environ``.
+
+    Matched by canonical entry key (case-folded on Windows), so a removal under a
+    different case than the write still recognises the entry ``.env`` owns.
+    """
     with _env_owned_keys_lock:
-        return key in _env_owned_keys
+        return _env_name_key(key) in _env_owned_keys
 
 
 def reset_env_owned_keys() -> None:
@@ -459,6 +468,19 @@ def adopt_env_owned_keys_from_reexec() -> bool:
 def changed_env_keys(old: Mapping[str, str], new: Mapping[str, str]) -> frozenset[str]:
     """Keys whose ``.env`` value differs between *old* and *new* (added/removed/edited)."""
     return frozenset(k for k in set(old) | set(new) if old.get(k, None) != new.get(k, None))
+
+
+def _env_name_key(name: str) -> str:
+    """The canonical form two names share iff they are the SAME ``os.environ`` entry.
+
+    POSIX environment names are case-sensitive, so the name is its own key.
+    Windows ``os.environ`` is case-INsensitive (``HTTPS_PROXY`` and
+    ``https_proxy`` are one entry), so there the key is the upper-cased name.
+    Used so a case-only ``.env`` rename -- which the diff sees as one key added
+    and another removed -- does not let the removal pop the entry the addition
+    just wrote on Windows.
+    """
+    return name.upper() if platform_compat.IS_WINDOWS else name
 
 
 def is_legal_env_name(key: str) -> bool:
@@ -561,6 +583,15 @@ def apply_env_credential_changes(
                 raise ValueError("illegal environment variable name in .env credential diff")
             if "\x00" in v:
                 raise ValueError("embedded NUL in .env credential value")
+    # The os.environ entries this batch WRITES (a changed key with a non-empty
+    # new value). A removed key must not pop an entry another key in the same
+    # batch is writing -- on Windows os.environ is case-insensitive, so a
+    # case-only rename (``https_proxy`` -> ``HTTPS_PROXY``) is one key added and
+    # one removed that share an entry; without this the removal would delete the
+    # value the addition just wrote. On POSIX the canonical key is the name
+    # itself, so a removed key (absent from ``new``) never collides and the
+    # behaviour is unchanged.
+    written_entry_keys = {_env_name_key(k) for k in changed if new.get(k)}
     applied: set[str] = set()
     for k in changed:
         if scrubbed and (k in CREDENTIAL_KEYS or _JIRA_TOKEN_RE.match(k)):
@@ -613,6 +644,15 @@ def apply_env_credential_changes(
             # dashboard path, no ownership tracking) pop unconditionally, the
             # pre-baseline behaviour.
             prior = os.environ.get(k)
+            # Do not pop an entry another key in THIS batch is writing: on a
+            # case-insensitive os.environ (Windows) a case-only rename adds one
+            # key and removes another that share the entry, so popping the
+            # removed one would delete the renamed value the addition just set.
+            # Leave ownership alone too -- the writing key owns the entry, and
+            # order within the batch is not deterministic, so discarding here
+            # could drop the ownership the set recorded.
+            if _env_name_key(k) in written_entry_keys:
+                continue
             if old is None or prior is None or env_owns_key(k):
                 os.environ.pop(k, None)
                 applied.add(k)
