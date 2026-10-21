@@ -386,6 +386,13 @@ class ConfigWatch:
         self._stale: dict[int, tuple[Subscription, frozenset[str]]] = {}
         self._cycle_lock: asyncio.Lock | None = None
         self.last_error: str | None = None
+        # The ``.env`` fingerprint a credential apply last FAILED on. A failed
+        # apply keeps the fingerprint unadvanced so the next tick retries, which
+        # means the same bad file re-fails every ~2s; this dedups the WARNING to
+        # once per distinct failing file state (like ``_warned_undecodable_env``
+        # for the undecodable case) and logs the retries at DEBUG, so a malformed
+        # ``.env`` line does not spew a full traceback into the log every tick.
+        self._apply_failed_fingerprint: tuple | None = None
 
     # ── registry ──────────────────────────────────────────────────────
 
@@ -1112,11 +1119,23 @@ class ConfigWatch:
             # next tick re-reads the file (its fingerprint still looks changed)
             # and retries the whole diff, and nothing is dispatched now so no
             # restart is run against a credential the apply did not install.
-            logger.warning("applying .env credential changes failed", exc_info=True)
+            #
+            # That retry means the SAME bad file re-fails every tick, so the
+            # WARNING (with its traceback) fires ONCE per distinct failing file
+            # state and the retries log at DEBUG -- the same warn-once shape the
+            # undecodable path uses -- rather than spamming ~43k tracebacks/day
+            # while a malformed line sits in ``.env``.
+            if self._apply_failed_fingerprint != env_fingerprint:
+                self._apply_failed_fingerprint = env_fingerprint
+                logger.warning("applying .env credential changes failed", exc_info=True)
+            else:
+                logger.debug("applying .env credential changes still failing", exc_info=True)
             return frozenset()
         # Apply succeeded: only now is the new map really in force, so advance
         # the baseline and fingerprint and dispatch the restart for the keys that
-        # moved.
+        # moved. Clear any prior apply-failure signature so a later failure warns
+        # afresh.
+        self._apply_failed_fingerprint = None
         self._env_fingerprint = env_fingerprint
         self._creds = new_creds
         return frozenset(f"{CREDENTIAL_CHANGE_PREFIX}.{k}" for k in changed_keys)

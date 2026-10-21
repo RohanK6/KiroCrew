@@ -459,7 +459,9 @@ class TestLoaderCredentialHelpers:
 
         offenders: list[str] = []
         for path in sorted(src.rglob("*.py")):
-            rel = str(path.relative_to(src))
+            # as_posix so the forward-slash allowlist matches on the Windows
+            # backend shard too (str(WindowsPath) uses backslashes).
+            rel = path.relative_to(src).as_posix()
             if rel in allow:
                 continue
             for lineno in _propagating_calls(ast.parse(path.read_text(encoding="utf-8"))):
@@ -723,6 +725,43 @@ class TestWatchEnvTracking:
         assert change.changed == frozenset({"credentials.TELEGRAM_BOT_TOKEN"})
         assert os.environ["TELEGRAM_BOT_TOKEN"] == "rotated"
         assert w._creds == {"TELEGRAM_BOT_TOKEN": "rotated"}
+
+    @pytest.mark.asyncio
+    async def test_a_persistently_failing_apply_warns_once_not_every_tick(
+        self, home: Path, monkeypatch, caplog
+    ):
+        """A failed apply keeps the .env fingerprint unadvanced so the next tick
+        retries -- which means the SAME bad file re-fails every ~2s. The WARNING
+        (with its traceback) must fire ONCE per distinct failing file state and
+        the retries log at DEBUG, not spew a traceback every tick. (Fixes the
+        Opus log-spam finding.)"""
+        import logging
+
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "before")
+        _write_env(home, "TELEGRAM_BOT_TOKEN=before\n")
+        w = self._primed_watch(home)
+
+        def _warn_count() -> int:
+            return sum(
+                1
+                for r in caplog.records
+                if r.levelno == logging.WARNING
+                and "applying .env credential changes failed" in r.getMessage()
+            )
+
+        # A malformed save that fails the apply on every tick. The fingerprint
+        # does not advance, so re-running _cycle keeps retrying the same file.
+        _write_env(home, "TELEGRAM_BOT_TOKEN=rotated\n=garbage\n")
+        with caplog.at_level(logging.DEBUG, logger="kiro_crew.config.live"):
+            for _ in range(5):
+                assert await w._cycle() is None
+        assert _warn_count() == 1, "the apply-failure WARNING fires once, not every tick"
+
+        # A DIFFERENT malformed save is a new failing fingerprint -> warns again.
+        _write_env(home, "TELEGRAM_BOT_TOKEN=rotated2\n=garbage\n")
+        with caplog.at_level(logging.DEBUG, logger="kiro_crew.config.live"):
+            assert await w._cycle() is None
+        assert _warn_count() == 2, "a new failing file state warns afresh"
 
     @pytest.mark.asyncio
     async def test_a_pure_env_edit_does_not_rebuild_the_config_snapshot(

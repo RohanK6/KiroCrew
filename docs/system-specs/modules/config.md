@@ -2606,7 +2606,12 @@ after the fix. The failing case is a malformed line saved in the same write as
 a rotation (an empty-name `=value` parses to the key `""`, which `os.environ`
 rejects); left unadvanced, the next tick re-reads and retries the whole diff,
 and because nothing dispatched, no channel restart runs against a credential the
-apply did not install.
+apply did not install. That retry means the same bad file re-fails every tick,
+so the failure WARNING (with its traceback) fires ONCE per distinct failing
+`.env` fingerprint and the retries log at DEBUG — the same warn-once shape the
+undecodable path uses — rather than spewing a traceback every poll interval
+while a malformed line sits in the file; a successful apply clears the
+remembered failure signature so a later failure warns afresh.
 
 The apply is also **atomic across the batch**, not just at the cycle level.
 `apply_env_credential_changes` validates every key it would WRITE (a changed key
