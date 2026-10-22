@@ -224,7 +224,10 @@ def posix_test_shell() -> str:
 # macOS reuses the same file-driven mechanism (macos-collect-ignore.txt). macOS is
 # POSIX, so the reasons that fill the Windows list do not apply there; that list is
 # expected to stay short or empty, and a file exists so a whole-file exclusion has
-# one documented home instead of an inline literal.
+# one documented home instead of an inline literal. The hook, and why it is a hook
+# rather than a ``collect_ignore`` list, is in platform_collect_ignore_helpers.py.
+from platform_collect_ignore_helpers import pytest_ignore_collect  # noqa: E402,F401
+
 from kiro_crew import platform_compat  # noqa: E402
 
 
@@ -247,26 +250,6 @@ def bundled_python_with_user_site(monkeypatch: pytest.MonkeyPatch) -> None:
     """Model the bundled interpreter with an otherwise enabled user site."""
     monkeypatch.setattr(site, "ENABLE_USER_SITE", True)
     monkeypatch.setattr(platform_compat, "is_bundled_interpreter", lambda: True)
-
-
-def _collect_ignore_from(listname: str) -> list:
-    """Bare test filenames listed in ``test/<listname>``, comments stripped."""
-    path = os.path.join(os.path.dirname(__file__), listname)
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return [name for name in (ln.split("#", 1)[0].strip() for ln in fh) if name]
-    except OSError:  # pragma: no cover - list file absent in a partial checkout
-        return []
-
-
-if platform_compat.IS_WINDOWS:
-    # Read from windows-collect-ignore.txt rather than an inline list: the CI
-    # reduced-scope selector (scripts/ci-surface-tests.py) has to apply the same
-    # exclusion, because naming a file explicitly on the pytest command line
-    # bypasses collect_ignore. One file, two readers, no drift.
-    collect_ignore = _collect_ignore_from("windows-collect-ignore.txt")
-elif platform_compat.IS_MACOS:
-    collect_ignore = _collect_ignore_from("macos-collect-ignore.txt")
 
 
 def make_escaping_link(inside: pathlib.Path, outside: pathlib.Path) -> str:
@@ -1210,6 +1193,26 @@ def _restore_autonudge_singleton():
 
 
 @pytest.fixture(autouse=True)
+def _reset_cjk_segmenter():
+    """Forget session search's registered Chinese segmenter around each test.
+
+    ``history_search.register_cjk_segmenter`` fills one process-global slot, and
+    the gateway boot fills it (``_init_services``). Tests share one interpreter, so
+    a test that boots the gateway would leave every LATER test in the worker parsing
+    Chinese queries into dictionary words, and the character-path tests would red
+    depending on which tests shared the worker. Read from ``sys.modules`` so a test
+    that never imports search pays nothing.
+    """
+    module = sys.modules.get("kiro_crew.history_search")
+    if module is not None:
+        module.reset_cjk_segmenter_for_tests()
+    yield
+    module = sys.modules.get("kiro_crew.history_search")
+    if module is not None:
+        module.reset_cjk_segmenter_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _reset_reasoning_effort_globals():
     """Snapshot + restore the process-global reasoning-effort allowlist around
     each test. The allowlist is union-only/monotonic by design (persistence
@@ -1754,7 +1757,7 @@ def _restore_default_child_watcher():
 
     Some tests install a real, non-default asyncio child watcher via the
     gateway's ``_install_child_watcher()`` -- notably
-    ``test_cli.py::test_real_subprocess_works_after_install_on_linux``, which on
+    ``test_cli_main_entry.py::test_real_subprocess_works_after_install_on_linux``, which on
     Linux installs a ``PidfdChildWatcher`` and runs ``asyncio.run``. On exit,
     ``asyncio.run`` detaches the watcher's loop, leaving a loop-less watcher in
     the global policy. Two distinct failures follow from that leak, and which

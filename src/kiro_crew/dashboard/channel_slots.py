@@ -955,6 +955,18 @@ def slot_closed_since(state: "DashboardState", slot_name: str, instant: float) -
     return when is not None and when >= instant
 
 
+def slot_close_instant(state: "DashboardState", slot_name: str) -> float | None:
+    """The instant *slot_name*'s tab was last closed in this process, or ``None``.
+
+    It is the value the close save persists as ``closed_at``, so a caller can tell
+    a close whose save has landed (the line's ``closed_at`` equals it) from one
+    still on its way by equality, which holds on a coarse clock and across a
+    clock step, where comparing clock readings does not.
+    """
+    closes = _RECENT_CLOSES.get(state) or {}
+    return closes.get(slot_name)
+
+
 def _tombstone_blocks(state: "DashboardState", session: dict[str, Any]) -> bool:
     """True when an in-memory close tombstone suppresses surfacing *session*.
 
@@ -992,7 +1004,47 @@ async def reconcile_channel_slots(state: "DashboardState", window_minutes: int) 
     their snapshot/surface/clear sequences.
     """
     async with _reconcile_lock(state):
-        return await _reconcile_channel_slots_locked(state, window_minutes)
+        surfaced = await _reconcile_channel_slots_locked(state, window_minutes)
+        if _linked_running_flipped(state):
+            state.push_slots_update()
+        return surfaced
+
+
+#: Per-state memo of each channel tab's last-seen ``linked_turn_running``. Keyed
+#: weakly for the same reason as ``_RECONCILE_LOCKS``.
+_LINKED_RUNNING_SEEN: "weakref.WeakKeyDictionary[Any, dict[str, bool]]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _linked_running_flipped(state: "DashboardState") -> bool:
+    """Whether any channel tab's channel-path turn started or ended since last pass.
+
+    A turn the channel path runs holds the linked session's lease and no task
+    on the tab, so its end raises no slots push of its own: the reconciler's
+    push fires only when transcript rows changed, and the lease is often
+    released after the reply row was already pulled in -- or with no row at all
+    (an in-channel stop, a failure posted only to the channel). Without this the
+    sidebar kept showing the finished turn as running until some unrelated push.
+    Bounds that lag to one reconcile interval.
+    """
+    seen = _LINKED_RUNNING_SEEN.get(state)
+    if seen is None:
+        seen = {}
+        _LINKED_RUNNING_SEEN[state] = seen
+    now: dict[str, bool] = {}
+    for name, slot in list(getattr(state, "_slots", {}).items()):
+        if not is_channel_session_key(getattr(slot, "linked_session_key", "") or ""):
+            continue
+        try:
+            now[name] = bool(slot.linked_turn_running)
+        except Exception:
+            continue
+    flipped = any(seen.get(name, False) != running for name, running in now.items())
+    # A tab that closed while its turn ran needs no push of its own.
+    seen.clear()
+    seen.update(now)
+    return flipped
 
 
 async def _reconcile_channel_slots_locked(state: "DashboardState", window_minutes: int) -> int:

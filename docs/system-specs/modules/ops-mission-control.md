@@ -1008,7 +1008,7 @@ directly. The keystone is read ONLY from itself; a test pins the policy path ont
 
 **The ceiling and provider-config writers are owner-only.** `PUT /settings`,
 `PUT /providers/{id}/config`, and `PUT` / `DELETE /providers/{id}/secret` call
-`require_owner_dashboard_request` (`dashboard/handlers/_shared.py`) after the app's enable gate
+`require_owner_dashboard_request` (`dashboard/handlers/_shared_access.py`) after the app's enable gate
 and before reading the body. A non-owner subject, and every app token including this app's own,
 gets `403` `owner_only` (a stale pre-owner bootstrap session gets the 401 re-auth answer); the
 denial is SEL-audited. The agent-facing routes are not owner-gated. Pinned by
@@ -2852,7 +2852,7 @@ than left to review:
   `signal.SIGKILL`), no `/bin/sh`, no `shell=True`, no hardcoded `/tmp`.
 - **Timezone lookup degrades to UTC.** `rotation.yaml` may name an IANA zone, and Windows
   ships no system tz database, so `ZoneInfo(...)` can raise. `tzdata` is a declared
-  Windows dependency, but an install missing it must still resolve a rotation rather than
+  dependency, but an install missing it must still resolve a rotation rather than
   crash the 5-minute cron. Verified by making the `zoneinfo` **import itself** fail — the
   real failure shape — and asserting the shift still resolves definitively
   (`on_shift=True, unknown=False`, correct `who`), just in UTC.

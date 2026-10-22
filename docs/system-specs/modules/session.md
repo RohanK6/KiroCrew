@@ -488,6 +488,12 @@ persistence alone cannot claim application.
 
 ## Background Session
 
+`get_bg_session()` awaits the bounded KAS floor verdict for the main backend
+before selecting the shared-runtime or provider-backed path, outside its runtime
+lock and start admission. Background one-liners use `agent.acp_backend`, not the
+member backend. The persistent provider path also waits before its start permit
+and provider factory.
+
 `BACKGROUND_KEY = "_bg"` is a persistent shared session for lightweight
 background work. It is:
 
@@ -2135,7 +2141,8 @@ newest turn opener before the resume row (a user, nudge or sub-agent row, or an
 `inject` whose kind is in `dashboard.state.TURN_OPENING_INJECT_KINDS` -- a cron,
 app or synthesis delivery; a recovery inject such as an earlier Resume press is
 walked past) plus the assistant text it had streamed, bracketed `[INTERRUPTED TURN …]` / `[END INTERRUPTED TURN]`.
-A mid-turn steer (a `user` row whose `meta.steer` is true, `replay._is_steer_row`)
+A mid-turn steer (a `user` row, or a monitor wake's `nudge` row, whose `meta.steer` is
+true, `replay._is_steer_row`)
 never opens the turn: the walk passes it on the way to the opener, and each steer
 is carried in the partial output, in the order it was sent, prefixed
 `[Steered mid-turn]`. A steer whose `meta.steerState` is `requeued` is walked
@@ -2916,7 +2923,7 @@ Two exemptions from the release-site rule, each on a fact about itself:
   that answer `has_active_or_initializing_sessions()`, so it has no running child to end
   and the parent conversation continues.
 
-A ratchet in `test_session.py` reads that off the source on the AST: a method that releases
+A ratchet in `test_session_parent_end_teardown.py` reads that off the source on the AST: a method that releases
 a companion runtime without calling both halves fails it, the two exemptions are named
 there, and an exempt method that stops releasing a runtime is reported so its exemption
 never goes unchecked. The `ends_conversation=True` call sites are pinned separately, by
@@ -3322,7 +3329,7 @@ process-local and monotonic for the slot lifetime; unlike `task`, normal turn te
 does not clear it, so code spanning an await can detect a turn that started and finished
 inside that interval.
 
-**Slash commands** (`slack/events.py`):
+**Slash commands** (`slack/events_slash.py`):
 - `/kirocrew sessions [all|ended]` — lists the last `slack.sessions_limit` recent
   sessions as task cards, each with a Resume button (`mc_session_resume_{key}`)
 
@@ -4268,7 +4275,7 @@ recorded, by the session's identity, when its own teardown ends. Bounded by cons
 entry lives exactly as long as the reset coroutine that recorded it, which already
 holds that session, so the table adds a reference per teardown in flight and never
 a lifetime. A caller that must know exactly which session ITS reset popped opens the scope itself (`SessionManager.teardown_scope(on_pop=...)`, passed to `reset` as `scope`): `on_pop` runs in the same lock hold as the pop, handed that session -- how the cron reaper takes the handle of the process a timed-out reset holds. A `SessionLifecycleService.reset` called without a scope records
-nothing; the facade is the caller that opens one. `test_session.py::
+nothing; the facade is the caller that opens one. `test_session_ending_verbs.py::
 TestResetRetainsTheTornDownSession` pins the entry's life; the cron module spec
 records what the reaper does with it.
 
@@ -4344,7 +4351,7 @@ hard-kill path on the shared runtime, so
 a per-step create already in flight is what the ending caller's post-pass read of
 the key remains the net for. Additive to the allocation-boundary predecessor
 capture: new state fields, new methods, and door checks as separate statements.
-`test_session.py::TestTheEndingFenceAdmitsNothingUnderTheKey` pins the held front
+`test_session_get_or_create.py::TestTheEndingFenceAdmitsNothingUnderTheKey` pins the held front
 door (cold start and claim), the in-flight invalidation with the hard kill and the
 re-allocation (fence up when the start returns, and lifted before), the pre-start
 variant, the spawn read (a start inside `start()` is a spawn in flight; a claim
@@ -4852,7 +4859,7 @@ NOT-applied notice; acknowledgement alone never confirms activation. The
 subagent, caller, single-consumption and argument-matching fences still apply.
 
 
-The session-bound MCP tools in `session_directive.DIRECTIVE_TOOLS` (the monitor verbs, `autonudge_stop`, `set_project`, `suggest_followup`, `nothing_to_do`, `reset_conversation`, `chat_tag`) are **stateless**, so they need no per-process identity source and work with MCP-gateway pooling off (`ask_question` is not in the set: it blocks on the `/api/agent-ask/*` routes and returns the answers as its result): the tool validates its arguments and returns a *directive* — a human-readable confirmation line plus a machine-readable marker (`session_directive.encode`) carrying the validated payload and NO session key. The session-aware consumer, `dashboard/chat_runner._run_chat`'s `EVENT_TOOL_RESULT` handler, decodes the marker (`session_directive.decode`) and applies the effect IN-PROCESS against ITS OWN `slot`/`session_key` via `dashboard/session_directive_apply.py`, then strips the marker from the stored transcript. This works with pooling OFF (the default) because the consumer already owns the session. The directives that act on the user's own surface (`_USER_SURFACE_DIRECTIVES`: `set_project`, `reset_conversation`, `chat_tag`) additionally require a user-turn provenance.
+The session-bound MCP tools in `session_directive.DIRECTIVE_TOOLS` (the monitor verbs, `autonudge_stop`, `set_project`, `suggest_followup`, `nothing_to_do`, `reset_conversation`, `chat_tag`) are **stateless**, so they need no per-process identity source and work with MCP-gateway pooling off (`ask_question` is not in the set: it blocks on the `/api/agent-ask/*` routes and returns the answers as its result): the tool validates its arguments and returns a *directive* — a human-readable confirmation line plus a machine-readable marker (`session_directive.encode`) carrying the validated payload and NO session key. The session-aware consumer, the `EVENT_TOOL_RESULT` phase `_on_tool_result` (`dashboard/chat_turn/tool_results.py`), decodes the marker (`session_directive.decode`) and applies the effect IN-PROCESS against ITS OWN `slot`/`session_key` via `dashboard/session_directive_apply.py`, then strips the marker from the stored transcript. This works with pooling OFF (the default) because the consumer already owns the session. The directives that act on the user's own surface (`_USER_SURFACE_DIRECTIVES`: `set_project`, `reset_conversation`, `chat_tag`) additionally require a user-turn provenance.
 
 Subagent isolation is therefore **structural, not cryptographic**: a subagent's tool result flows through the subagent's own runner and can only ever bind to the subagent's session, never its parent's — there is no `/proc` walk to get wrong. The tools still call `_resolve_session_key_strict()`, but only as a context guard to short-circuit sessions where a directive can never be applied (cron/hook/subagent) — not to bind the effect. `ask_question` is NOT a directive: it blocks on the strict `/api/agent-ask/*` routes, which attest the key the tool resolves and address the card to that session's own slot, so a sub-agent (no strict key) is refused before any card is shown.
 
@@ -4870,7 +4877,7 @@ Gateway-off (the default topology this targets), the model's tool result is the 
 sequenceDiagram
     participant M as Model
     participant T as MCP tool (kirocrew-core)
-    participant R as chat_runner._run_chat<br/>(EVENT_TOOL_RESULT)
+    participant R as chat_turn.tool_results._on_tool_result<br/>(EVENT_TOOL_RESULT)
     participant A as session_directive_apply
     M->>T: call e.g. monitor_start(args)
     T->>T: validate args (resolves NO session identity for the effect)

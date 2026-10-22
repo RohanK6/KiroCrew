@@ -493,7 +493,7 @@ quarantine exclusion, and the discover-and-sync step (`sync_discovered_servers`,
 | `mcp_discovery_probe_state.py` | the protocol revision the remote probe offers and steps down to, the probe timeouts and error cap, the once-only warning ledgers, and the probe-result cache |
 | `mcp_discovery_managed.py` | the managed servers' subcommand and tool-module tables, `managed_server_is_session_bound`, the in-process tool read, and stale-command repair |
 | `mcp_discovery_config.py` | loading the agent config and the `mcp.json` sources per scope, and `list_servers` |
-| `mcp_discovery_remote.py` | `_probe_remote`: the HTTP handshake, header expansion, and the authorization checks |
+| `mcp_discovery_remote.py` | `_probe_remote`: the SSRF vet and pinned connection, the HTTP handshake, header expansion, and the authorization checks |
 | `mcp_discovery_probe.py` | `probe_server`: refusing a disabled server, and the stdio handshake of a local server spawned in the sandbox on a private loop, with its temp refusals |
 
 `list_servers()` reads `~/.kiro/agents/kirocrew.json`, then each scope file with
@@ -509,7 +509,19 @@ Probes run from `POST /api/mcp/probe`:
 
 - **stdio** servers are spawned and driven through an MCP `initialize` handshake
   followed by `tools/list`.
-- **HTTP** servers get the same two JSON-RPC calls over POST. The remote probe
+- **HTTP** servers get the same two JSON-RPC calls over POST. The configured url
+  is first SSRF-vetted off the event loop through `link_unfurl.vet_unfurl_url`
+  (the vet the link preview, calendar, WeCom and OAuth-discovery fetches share)
+  and the connection is pinned to the vetted address, so a server url resolving to
+  a link-local address or the cloud metadata endpoint (`fd00:ec2::254` included)
+  is refused before any POST — a configured entry cannot make the gateway reach
+  the metadata service the agent's own shell is fenced from and reflect the reply
+  onto the row. Two opt-ins fit the vet to a configured endpoint: `allow_any_port`
+  (a server on `:8443` / `:8000` / `:3000` probes) and `allow_private` (a loopback
+  or LAN server, such as an app backend on `127.0.0.1`, probes, as kiro-cli itself
+  connects to it). Redirects are not followed, so a server cannot hand the
+  handshake to an address the vet never checked; a redirect reports as its status.
+  The remote probe
   offers `MCP_CLIENT_PROTOCOL_VERSION` (`2025-06-18`) in `initialize`. A `-32602`
   refusal of that offer whose `data.supported` lists an older revision makes it
   retry once with the newest such revision. Every request after `initialize`
@@ -520,6 +532,22 @@ Probes run from `POST /api/mcp/probe`:
 - **Disabled servers are never spawned.** `probe_all()` returns a muted row as
   an unprobed `status: "disabled"` placeholder with no error text, keeping the
   tools of its last real probe, and writes nothing to the probe cache.
+- **Names that start the same process are probed one at a time.** One server is
+  often configured under several names, and probing them together starts the
+  same heavy process several times at once; the copies can each miss the probe
+  timeout and build a quarantine streak against a server that works.
+  `probe_all()` keys every local row by `_spawn_fingerprint` (command plus args;
+  env is left out, because a different token still starts the same package) and
+  holds one lock per key, taken before the shared `PROBE_MAX_CONCURRENCY` slot,
+  so rows with different keys still run in parallel. Remote rows get no key.
+  Each name still gets its own probe, env and verdict, and the quarantine rule
+  is unchanged. The cost: a pass with *n* names of one slow server takes up to
+  *n* full probe durations for that server instead of one, and one probe of a
+  stdio server can last nearly two timeouts (`initialize` and `tools/list`
+  each get a fresh one) plus teardown. The boot gate in
+  `service_boot.py` waits `mcp_probe_timeout_secs + 15` for the first pass and
+  then starts sessions anyway, so a large alias group of a slow server can
+  outlast it; the pass still finishes in the background and fills the cache.
 - **Both calls must succeed for `ok`.** An initialize that answers and a
   `tools/list` that does not (no response, an error reply, a non-200) is a
   server no session can get a tool out of — the badge certifies "tools usable",
@@ -3516,7 +3544,7 @@ Two steps, and the generator fails on either one alone; then regenerate:
    accepts an intrinsic element, or a component in its `FORWARDING_PROVEN`
    list (`Btn`, `SendBtn`, `DropdownMenuItem`, `Glass`, `IconButton`,
    `Clickable`, `Link`, `NavItem`, `Row`, `AddMenuItem`, `SimpleSelect`,
-   `SegmentedControl`, `CrewEditorRail`, `Table`, `DropdownMenuSubTrigger`,
+   `SegmentedControl`, `CrewEditorNextRail`, `Table`, `DropdownMenuSubTrigger`,
    `Item` today),
    each with its own rendered forwarding test, whose `afterEach` fails on any
    `data-ui-location` in the document not registered under that same id
@@ -4033,7 +4061,7 @@ cannot arrive inside one whose grant was never meant to cover it.
 
 Per-agent scoping composes on top and needs no new mechanism: an agent spec's own
 `mcpServers` map decides which agents see a server at all
-(`agent_discovery.py`), so a server can be handed to an orchestrator-class agent
+(`agent_discovery_parts/agent_roster.py`), so a server can be handed to an orchestrator-class agent
 without every agent inheriting it.
 
 Adding a managed server is a **parity tax** — the name must appear in
@@ -4532,7 +4560,7 @@ is what `nothing_to_do`, `monitor_start`, `monitor_watch`, `monitor_update`,
 `monitor_stop`, `autonudge_stop`, `set_project`, `suggest_followup`,
 `reset_conversation` and `chat_tag` do (`session_directive.DIRECTIVE_TOOLS`). The tool validates its arguments and
 returns a human-readable confirmation plus a marker line carrying the validated
-payload and **no session key**. `dashboard/chat_runner`'s tool-result handler
+payload and **no session key**. `_on_tool_result` (`dashboard/chat_turn/tool_results.py`)
 decodes the marker, applies the effect against **its own** `slot.key`, then
 strips the marker from the stored transcript. Sub-agent isolation is therefore
 structural rather than cryptographic: a sub-agent's tool result flows through the

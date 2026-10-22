@@ -142,6 +142,9 @@ export interface Slot {
     // the gateway it talks to must keep rendering. See `chipLabel`.
     label?: string
     ci?: 'running' | 'passed' | 'failed' | null
+    // `'1'` when `ci` is `failed` but other checks are still running. See
+    // `PullRequestStatus.ciPending`.
+    ciPending?: string
     state?: 'open' | 'draft' | 'merged' | 'closed'
     // Owner-gated chips spread the whole cached chip-status entry, which also
     // carries the settled merge pair. Present only once the provider settled it.
@@ -182,6 +185,8 @@ export interface AgentInfo {
   session_color?: string
   /** The roster namespace (`/api/agents/catalog`); `member` is a crewmate. */
   selection_kind?: 'member' | 'template'
+  /** A crewmate's presentation label, shown in place of `name`. */
+  display_name?: string
 }
 
 export type SessionFilterKey = 'unread' | 'running' | 'pinned' | 'recent'

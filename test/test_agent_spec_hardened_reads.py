@@ -1032,26 +1032,36 @@ _EXPECTED_CALL_SITE_LABELS: dict[str, list[tuple[str, str]]] = {
     # two was refused rather than leaving the reader to guess. The third is the same
     # project read made for Crew-fired spec hooks (``project_agent_spec``), named
     # for that surface so a refusal there is not filed under the MCP projection.
+    # The app launch copy, read by its reserved name's path to hold it as a view.
+    "kiro_crew/acp/runtime_spawn_launch.py": [("app_agent_launch", "acp")],
+    # The pinned spec a session's skill scope is read from (an app launch copy's).
+    "kiro_crew/skill_scope_pin.py": [("agent_skill_globs", "unknown")],
     "kiro_crew/acp/session_mcp.py": [
         ("session_mcp_project_agent", "unknown"),
         ("session_mcp_servers", "unknown"),
         ("spec_hooks_project_agent", "unknown"),
     ],
-    "kiro_crew/agent.py": [
-        ("agent_spec_lookup", "unknown"),
+    "kiro_crew/agent_parts/spec_lookup.py": [("agent_spec_lookup", "unknown")],
+    "kiro_crew/agent_parts/spec_upgrades.py": [
         ("migrate_agent_specs", "unknown"),
         ("migrate_relocated_skill_uris", "unknown"),
     ],
     "kiro_crew/agent_capabilities.py": [("capability_publish", "dashboard")],
-    "kiro_crew/agent_discovery.py": [
-        ("agent_skill_globs", "unknown"),
+    "kiro_crew/agent_discovery_parts/agent_roster.py": [
         # ``agent_welcome_message`` reads the PROJECT checkout's specs itself
         # (project scope shadows the user level, as `list_agents` resolves it),
         # so it names the hint read rather than forwarding: a refused checkout
         # spec is attributed to the greeting, not to whichever surface asked.
         ("agent_welcome_message", "unknown"),
         ("forward:operation", "forward:source"),
-        ("forward:operation", "forward:source"),
+        ("list_agents", "unknown"),
+        ("list_agents", "unknown"),
+    ],
+    "kiro_crew/agent_discovery_parts/project_agents.py": [
+        ("resolve_project_agent_name", "unknown"),
+    ],
+    "kiro_crew/agent_discovery_parts/skill_scope.py": [("agent_skill_globs", "unknown")],
+    "kiro_crew/agent_discovery_parts/spec_reads.py": [
         # ``spec_by_declared_name`` scans specs it did not name for whichever
         # surface resolves an agent id and finds no ``<agent_id>.json``; it
         # forwards so each such surface attributes its own denials.
@@ -1059,9 +1069,13 @@ _EXPECTED_CALL_SITE_LABELS: dict[str, list[tuple[str, str]]] = {
         # ``agent_spec_stems`` reads each ``*.md`` to decide whether it is a
         # spec at all, for the Slack listings; it forwards for the same reason.
         ("forward:operation", "forward:source"),
-        ("list_agents", "unknown"),
-        ("list_agents", "unknown"),
-        ("resolve_project_agent_name", "unknown"),
+    ],
+    "kiro_crew/agent_discovery_parts/spec_snapshot.py": [("forward:operation", "forward:source")],
+    "kiro_crew/apps/agent_launch.py": [
+        ("app_agent_launch", "unknown"),
+        ("app_agent_launch", "unknown"),
+        ("app_agent_launch", "unknown"),
+        ("app_agent_launch", "unknown"),
     ],
     "kiro_crew/apps/builtins/auto_improvement/spine/crew_runner.py": [
         ("auto_improvement_assignment", "unknown")
@@ -1182,28 +1196,30 @@ _EXPECTED_CALL_SITE_LABELS: dict[str, list[tuple[str, str]]] = {
 # work and can never reach the denial log line.
 _EXPECTED_PROJECT_NAMES_CALL_SITE_LABELS: dict[str, list[tuple[str, str]]] = {
     "kiro_crew/agent.py": [("require_fork_governance", "unknown")],
-    "kiro_crew/agent_discovery.py": [("forward:operation", "forward:source")],
+    "kiro_crew/agent_discovery_parts/project_agents.py": [
+        ("forward:operation", "forward:source"),
+    ],
     "kiro_crew/config/loader_snapshots.py": [("project_declares_agent", "unknown")],
     "kiro_crew/dashboard/handlers/agents.py": [("api_kirocrew_agents", "dashboard")],
 }
 
 
 # The file scan under the name scan: most surfaces want the FILES, so they reach
-# the refusal directly and must name themselves the same way. ``agent.py`` holds
+# the refusal directly and must name themselves the same way. ``agent_parts/spec_lookup.py`` holds
 # two lookups with different user-facing meanings (resolving a markdown spec for
 # an agent, and deciding whether a checkout shadows a managed agent), so they are
 # labelled apart. The in-module hop inside ``project_agent_names`` is pinned as
 # forwarding: a literal there would erase the surface that asked.
 _EXPECTED_PROJECT_FILES_CALL_SITE_LABELS: dict[str, list[tuple[str, str]]] = {
     "kiro_crew/acp/session_mcp.py": [("session_mcp_project_agent", "unknown")],
-    "kiro_crew/agent.py": [
+    "kiro_crew/agent_parts/spec_lookup.py": [
         ("agent_project_shadow", "unknown"),
         ("markdown_spec_lookup", "unknown"),
     ],
     # No ``kiro_crew/apps/manager_lookup.py`` entry: the app-command guard scans the
     # checkout through ``acp.managed_agent_shadow.project_claims_agent_name``,
     # the screened recursive walk, not through these roster helpers.
-    # No ``kiro_crew/agent_discovery.py`` entry on purpose. The two in-module
+    # No ``kiro_crew/agent_discovery_parts/`` entry on purpose. The two in-family
     # readers (``list_agents``, ``project_agent_names``) decide this scope's
     # sensitivity THEMSELVES -- pinned in
     # ``_EXPECTED_SCOPE_GUARD_CALL_SITE_LABELS`` -- and then scan through the
@@ -1318,13 +1334,13 @@ def _labelled_call_sites(target: str) -> dict[str, list[tuple[str | None, str | 
 # surface triggered a denial. Callers therefore name themselves at the call
 # site, and the wrapper's own `_read_agent_spec` call is pinned as forwarding.
 _EXPECTED_PARSED_SPECS_CALL_SITE_LABELS: dict[str, list[tuple[str, str]]] = {
+    "kiro_crew/agent_discovery_parts/skill_scope.py": [("agent_skill_globs", "unknown")],
     # ``cached_agent_specs`` is the on-loop face of the same snapshot: it
     # forwards its caller's labels into the pool-side refresh, so the surface
     # that asked still owns the denial. Pinned as forwarding, like the wrapper.
     # ``warm_agent_specs`` is the awaited face: it hands the parse to the pool
     # by reference and forwards for the same reason.
-    "kiro_crew/agent_discovery.py": [
-        ("agent_skill_globs", "unknown"),
+    "kiro_crew/agent_discovery_parts/spec_snapshot.py": [
         ("forward:operation", "forward:source"),
         ("forward:operation", "forward:source"),
     ],
@@ -1332,12 +1348,14 @@ _EXPECTED_PARSED_SPECS_CALL_SITE_LABELS: dict[str, list[tuple[str, str]]] = {
     # factory; it reads the snapshot so a warm call re-parses nothing, and keeps
     # the label its per-file hardened read carried.
     "kiro_crew/config/loader_config.py": [("load_config", "unknown")],
-    "kiro_crew/dashboard/handlers/_shared.py": [("skills_loaded_by_agents", "dashboard")],
+    "kiro_crew/dashboard/handlers/_shared_skill_listing.py": [
+        ("skills_loaded_by_agents", "dashboard")
+    ],
     # The guide's diagnose probe lists the models agent specs pin; a refused spec
     # pins nothing usable, so the folding snapshot is the right reader.
     "kiro_crew/diagnose_probes.py": [("diagnose", "dashboard")],
     # Export/import warn about crew rows whose template this machine lacks.
-    "kiro_crew/portability.py": [("portability", "dashboard")],
+    "kiro_crew/portability_templates.py": [("portability", "dashboard")],
 }
 
 
@@ -1390,13 +1408,13 @@ _EXPECTED_STRICT_CALL_SITE_LABELS: dict[str, list[tuple[str, str]]] = {
 # the denial row when the answer is "protected tree" -- but it is where the
 # ``operation``/``source`` pair now reaches the log, so a literal written here in
 # place of a forward would erase the asking surface from every denial the
-# enclosing function records. ``list_agents`` is the one in-module caller that IS
+# enclosing function records. ``list_agents`` is the one in-family caller that IS
 # the surface, so its literals are the pinned exception.
 _EXPECTED_SCOPE_GUARD_CALL_SITE_LABELS: dict[str, list[tuple[str, str]]] = {
-    "kiro_crew/agent_discovery.py": [
+    "kiro_crew/agent_discovery_parts/agent_roster.py": [("list_agents", "unknown")],
+    "kiro_crew/agent_discovery_parts/project_agents.py": [
         ("forward:operation", "forward:source"),
         ("forward:operation", "forward:source"),
-        ("list_agents", "unknown"),
     ],
     # The reaper decides a recorded checkout's sensitivity once, then lists it
     # itself, so a failed listing keeps the file instead of reading as "no agents".

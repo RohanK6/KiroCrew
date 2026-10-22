@@ -254,6 +254,15 @@ async def _init_services(self: GatewayOrchestrator) -> None:
     except Exception:
         logger.debug("service config watchers not fully registered", exc_info=True)
 
+    # Session search splits Chinese runs into dictionary words in THIS process,
+    # which holds the host's one copy of the dictionary; mcp-core processes ask
+    # it over /api/search/segment. In-memory wiring only: the dictionary itself
+    # loads on the first Chinese query.
+    from kiro_crew.history_search import register_cjk_segmenter
+    from kiro_crew.history_words import segment_runs
+
+    register_cjk_segmenter(segment_runs)
+
     # Memory, skills, hooks, lessons
     memory = MemoryStore()
 
@@ -962,6 +971,17 @@ async def run(self: GatewayOrchestrator) -> None:
         _checkout_task = asyncio.create_task(asyncio.to_thread(warn_if_running_from_git_checkout))
         self._background_tasks.add(_checkout_task)
         _checkout_task.add_done_callback(self._background_tasks.discard)
+
+    # Disable and mark pending any app whose sessionApproval grant was never
+    # consented to. Past KIROCREW_READY (no-new-work-on-gateway-boot-path):
+    # the grant is refused on read already, so readiness need not wait.
+    # Fire-and-forget, file work off-loop, per-app lifecycle lock, never raises.
+    if not self._test_mode:
+        from kiro_crew.apps.session_consent import reconcile_after_ready
+
+        _consent_task = asyncio.create_task(reconcile_after_ready())
+        self._background_tasks.add(_consent_task)
+        _consent_task.add_done_callback(self._background_tasks.discard)
 
     # The run directories a PREDECESSOR gateway of this data home left behind
     # (session_work_dir). Ordered after ``cleanup_orphaned_sessions`` above,

@@ -23,6 +23,7 @@ from integration import conftest as harness
 from kiro_crew import identity_stores, onboarding_sources, safety_override
 from kiro_crew.agent_sdk import host_auth
 from kiro_crew.dashboard.handlers import kiro_usage_api
+from kiro_crew.platform import governance
 from kiro_crew.slack.gateway import GatewayOrchestrator
 
 try:
@@ -84,6 +85,18 @@ def test_dump_dir_must_be_absolute_and_outside_the_checkout(tmp_path: Path) -> N
     inside = Path(harness.__file__).resolve().parents[2] / "build" / "integration-hits"
     with pytest.raises(pytest.UsageError, match="inside the repository checkout"):
         harness.resolve_dump_dir(str(inside))
+
+
+def test_the_reset_forgets_the_confirm_tools_memo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ``hooks.confirm_tools`` memo holds patterns read from one home's
+    config files. Whether a boot fills it depends on timing, so the reset
+    that runs between boots must drop it, or the second-boot witness sees
+    it change whenever an earlier boot in the worker filled it."""
+    monkeypatch.setattr(governance, "_CONFIRM_PATTERNS_MEMO", (("fingerprint", 0), ("x__*",)))
+    assert not harness.home_bound_globals_are_clear()
+    harness._reset_home_bound_globals()
+    assert governance._CONFIRM_PATTERNS_MEMO is None
+    assert harness.home_bound_globals_are_clear()
 
 
 @pytest.mark.asyncio
@@ -457,6 +470,12 @@ _KNOWN_SECOND_BOOT_CHANGES: dict[tuple[str, str], str] = {
     ("kiro_crew.hooks", "_global_script_hook_store"): "replaced per boot",
     ("kiro_crew.skill_usage", "_global_skill_read_observer"): "replaced per boot",
     ("kiro_crew.slack.interactions", "_orch"): "replaced per boot",
+    ("kiro_crew.slack.interactions_approvals", "_orch"): "replaced per boot",
+    ("kiro_crew.slack.interactions_context", "_orch"): "replaced per boot",
+    ("kiro_crew.slack.interactions_modals", "_orch"): "replaced per boot",
+    ("kiro_crew.slack.interactions_options", "_orch"): "replaced per boot",
+    ("kiro_crew.slack.interactions_sessions", "_orch"): "replaced per boot",
+    ("kiro_crew.slack.interactions_settings", "_orch"): "replaced per boot",
     ("kiro_crew.taskq.dependency", "_current"): "cleared by _shutdown()",
     # The operator-declared model windows (``agent.model_context_tokens``): each boot's
     # config apply rebinds the global to a fresh dict built from that boot's own config,
@@ -465,7 +484,8 @@ _KNOWN_SECOND_BOOT_CHANGES: dict[tuple[str, str], str] = {
     ("kiro_crew.model_registry", "_OPERATOR_WINDOWS"): "rebound by every config apply",
     # Caches keyed by the thing they cache (a path, a server name), so a stale
     # entry is never returned for a different home.
-    ("kiro_crew.agent_discovery", "_LIST_AGENTS_CACHE"): "keyed cache",
+    ("kiro_crew.agent_discovery_parts.agent_roster", "_LIST_AGENTS_CACHE"): "keyed cache",
+    ("kiro_crew.agent_discovery_parts.spec_snapshot", "_LIST_AGENTS_CACHE"): "keyed cache",
     ("kiro_crew.apps.dev_mode", "_dev_apps_cache"): "keyed cache",
     ("kiro_crew.apps.manager_builtins", "_orphaned_builtins_cache"): "keyed cache",
     ("kiro_crew.autonudge", "_MAINTENANCE_LOCKS"): "keyed cache",
@@ -473,7 +493,7 @@ _KNOWN_SECOND_BOOT_CHANGES: dict[tuple[str, str], str] = {
     ("kiro_crew.dashboard.handlers.mcp_probe", "_mcp_probe_ts"): "keyed cache",
     ("kiro_crew.mcp_discovery_probe_state", "_probe_cache"): "keyed cache",
     ("kiro_crew.mcp_discovery_probe", "_probe_cache"): "keyed cache",
-    ("kiro_crew.agent_discovery", "_PARSED_SPECS_CACHE"): "keyed cache",
+    ("kiro_crew.agent_discovery_parts.spec_snapshot", "_PARSED_SPECS_CACHE"): "keyed cache",
     # Process-wide values resolved on first use, home-independent: the thread
     # pools, and the umask-derived default file mode (``0o666 & ~umask``) that
     # the first atomic write OUTSIDE the data home resolves -- inside the home
@@ -481,6 +501,12 @@ _KNOWN_SECOND_BOOT_CHANGES: dict[tuple[str, str], str] = {
     # session writes the workspace ``.kiro/cli.json`` overlay from a task that
     # races shutdown, so either boot may be the one that fills it.
     ("kiro_crew.atomic_write", "_default_mode"): "lazy umask cache",
+    # The dotted names of the facades imported so far in this process. A
+    # facade imported lazily by a boot's background work (the update check
+    # imports ``platform.wheel_engine``) is added by whichever boot first
+    # gets that far, so it may land in either; the names are modules, not
+    # home state.
+    ("kiro_crew._facade_mirror", "_INSTALLED"): "lazy import registry",
     ("kiro_crew.executors", "_pool"): "lazy thread pool",
     ("kiro_crew.executors", "_subprocess_pool"): "lazy thread pool",
     ("kiro_crew.executors", "_kiro_spawn_pool"): "lazy thread pool",

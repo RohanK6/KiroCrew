@@ -28,7 +28,7 @@ Four parts, in the order you will need them:
   declares `"node": ">=22.12.0"`; `kirocrew doctor` fails below Node 22.12.0, and startup logs a warning.
 - **RAM**: there is no single published floor, because the footprint scales with
   concurrent sessions, spawned subagents, and MCP servers. Two figures from the
-  code give you the shape of it: `acp/runtime.py` recycles a long-lived
+  code give you the shape of it: `acp/runtime_liveness.py` recycles a long-lived
   multiplexed backend once it passes 500 MiB RSS
   (`_DEFAULT_MAX_RSS_MB = 500.0`), and the embedding model is loaded in-process
   from a ~610MB GGUF file. Measure your own steady state, then leave headroom:
@@ -653,7 +653,7 @@ expiry**: open the dashboard at least once a month and you need never mint
 another link.
 
 The access-session numbers still govern the initial mint. The chat-command
-default is 1 hour (`ttl = 3600` in `slack/events.py` and `slack/handler_runtime/commands.py`);
+default is 1 hour (`ttl = 3600` in `slack/events_slash.py` and `slack/handler_runtime/commands.py`);
 pass a duration to raise it (`/kirocrew dashboard 6h`,
 `/kirocrew dashboard 20h`). `parse_duration` accepts `<N>h` or `<N>m` and clamps
 to the 20-hour ceiling, so asking for more silently gets you 20 hours rather than

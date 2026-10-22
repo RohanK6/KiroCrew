@@ -65,13 +65,13 @@ _REJECTED_MODEL_SENTINEL = ".rejected-custom-model.invalid"
 
 # ── Runtime constants ──
 
-# Qwen3-Embedding requires last-token pooling (LLAMA_POOLING_TYPE_LAST). Every
-# model, custom encoders included, is loaded with this value passed explicitly,
-# so the runtime never reads a GGUF's own pooling_type key; honouring a declared
-# key is tracked separately. On BERT-family files measured last-token vectors
-# rank paraphrases above unrelated pairs as well as mean-pooled ones do (see the
-# embedding section of docs/system-specs/modules/memory-skills-hooks.md).
+# Qwen3-Embedding requires last-token pooling (LLAMA_POOLING_TYPE_LAST), and it
+# stays the pooling of every model whose id names no other (see
+# model_pooling_type): the bundled model, and a custom model recorded before its
+# file's declared pooling was honoured. The value is always passed explicitly.
 _POOLING_TYPE_LAST = 3
+# llama.cpp's `enum llama_pooling_type` values for the poolings a model can ask for.
+_POOLING_TYPES = {"mean": 1, "cls": 2, "last": _POOLING_TYPE_LAST}
 # Architectures the vendored llama.cpp runs WITHOUT a KV cache (the `res =
 # nullptr` cases of llama_model::create_memory in src/llama-model.cpp, plus the
 # t5encoder encoder-only path). llama_decode() routes them through encode(),
@@ -85,7 +85,7 @@ _POOLING_TYPE_LAST = 3
 # satisfies the check), while an ADDED cache-less architecture is invisible to it
 # and must be re-mirrored by hand (see the bump procedure in _vendor/README.md).
 # Membership decides only the micro-batch shape (see _model_context_policy);
-# pooling is _POOLING_TYPE_LAST for every file.
+# pooling comes from the model's id (see model_pooling_type).
 # Non-causal models that DO keep a KV cache (llama-embed, or any decoder family
 # re-tagged bidirectional) are not named here: they declare
 # `<architecture>.attention.causal = false` and _model_context_policy() reads
@@ -122,10 +122,13 @@ _ENCODER_ARCHITECTURES = frozenset(
 # instead (see _model_context_policy).
 _N_CTX = 2048
 # Physical decode micro-batch. Keeping this below the logical batch bounds the
-# compute scratch arena without reducing the accepted context. Qwen3's
-# 6,000-char maximum input produces byte-identical vectors at 512 and 2048,
-# while 512 avoids roughly 419 MiB of peak RSS on the shipped Linux runtime.
-_N_UBATCH = 512
+# compute scratch arena and llama.cpp's per-token output buffer (one row per
+# micro-batch token, 610,772 bytes each for the shipped model) without reducing
+# the accepted context. On the shipped Qwen3 file and the vendored Linux CPU
+# runtime, 256, 512 and 2048 produce byte-identical vectors under last-token
+# pooling; 256 holds 317 MiB less anonymous memory than 512 once a long input
+# has run, at the same embed latency.
+_N_UBATCH = 256
 # Safety truncation (chars) before inference, sized under _N_CTX at a
 # conservative ~4 chars/token so a clipped input always fits the context
 # window. Only pathological un-chunked blobs exceed this; mirrors the

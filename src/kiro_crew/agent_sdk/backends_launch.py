@@ -94,6 +94,8 @@ ACP_BACKENDS_INTERNAL_SANDBOX = frozenset({ACP_BACKEND_KIRO})
 # deepseek is excluded on the same grounds: its whole home is ``DSH_HOME``, which its
 # auth declaration names, so the floor re-anchors the declared leaf under the
 # override and a ``$HOME`` relocation reaches nothing the override does not.
+# KAS is excluded although Crew spawns it through ``kiro-cli`` too: where KAS keeps
+# its MCP OAuth grants is not measured, so it stays out under the rule above.
 ACP_BACKENDS_POD_HOME_REMAP = frozenset({ACP_BACKEND_KIRO})
 
 
@@ -158,7 +160,11 @@ ACP_BACKEND_LAUNCH: Mapping[str, SelfServedLaunch] = {
         binary="opencode",
         acp_args=("acp",),
         bin_env_var="OPENCODE_BIN",
-        install_command="npm i -g opencode-ai",
+        # Pinned to the tested major: the unpinned name installs the latest
+        # release, which an operator following this advice after a 2.x release
+        # would then have every launch refuse (the version gate in
+        # acp/harness/opencode.py names the line it measured).
+        install_command="npm i -g opencode-ai@1",
         protocol_version=1,
         missing_hint="No adapter package is needed: this harness serves ACP itself.",
     ),

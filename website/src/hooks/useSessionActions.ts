@@ -1,10 +1,10 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, ApiError } from '../api/client'
 import { apiErrorCode, isSlotCapError } from '../api/apiError'
 import { store, useAppDispatch } from '../store'
 import type { MuteFlag } from '../store/dashboardSlice'
-import { deleteSlot, switchSlot } from '../store/chatSlice'
+import { captureForkOrigin, deleteSlot, forkMayOpen, listForkedSlot, switchSlot } from '../store/chatSlice'
 import { updateSlotPin, updateSlotMuteFlag, setSlotMuteFlagError, markSlotRead, markSlotUnread, slotWriteStampOf } from '../store/dashboardSlice'
 import { emitSlotRead } from '../lib/slotReadRelay'
 import { copySessionLink } from '../utils/shareUrl'
@@ -119,7 +119,15 @@ export interface SessionActions {
   close: (slotKey: string) => void
 }
 
-export function useSessionActions(mode?: string): SessionActions {
+export function useSessionActions(mode?: string, opts?: {
+  /** The host's "a session was opened from here" callback (ChatSidebar's
+   *  `onSelectSlot`). Duplicate reports the fork through it after switching, the
+   *  way a row click does, so ChatPage leaves Split View instead of keeping the
+   *  old panes over the newly active fork. */
+  onOpened?: (key: string) => void
+}): SessionActions {
+  const onOpenedRef = useRef(opts?.onOpened)
+  onOpenedRef.current = opts?.onOpened
   const dispatch = useAppDispatch()
   const queryClient = useQueryClient()
   const moveSlotToFolder = useMoveSlotToFolder()
@@ -231,13 +239,23 @@ export function useSessionActions(mode?: string): SessionActions {
   )
   const forkMutation = useMutation({
     mutationFn: (slot: string) => api.forkChatSlot(slot),
-    onSuccess: (data) => {
+    onMutate: () => ({ origin: captureForkOrigin(store.getState()) }),
+    onSuccess: (data, _slot, started) => {
       if (data?.ok && data.key) {
         // A refusal describes a condition that no longer holds: leaving it under the row
         // contradicts the tab this success just opened.
         setForkError(null)
         queryClient.invalidateQueries({ queryKey: ['slots'] })
+        // List the fork before activating it. The chat page clears an active
+        // session its slot list lacks and then auto-opens the remembered chat,
+        // so switching first lands the user in an unrelated chat.
+        dispatch(listForkedSlot(data))
+        // The user opened another session while the fork ran: the fork stays
+        // listed, and the view and its chrome (Split View) stay as they are.
+        if (!forkMayOpen(store.getState(), started.origin)) return
         dispatch(switchSlot(data.key))
+        // switchSlot.pending has already made the fork the active slot.
+        onOpenedRef.current?.(data.key)
       }
     },
     // Duplicate goes through this mutation with no per-call handler, so this is

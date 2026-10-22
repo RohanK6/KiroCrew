@@ -102,8 +102,8 @@ export function acpBackendShortName(id: string): string {
  *
  * - `rule`: only where the server classed the reach as able to cost a whole
  *   server (`mcp.costs_whole_server === true`). The classification is the
- *   server's (`agent_sdk/backend_mcp_ability.COSTS_WHOLE_SERVER`, held to the
- *   reach vocabulary by a completeness test), never re-derived from the reach
+ *   server's (each reach declares it on
+ *   `providers/mirrors/registry.PerToolDeny.costs_whole_server`), never re-derived from the reach
  *   name here: today it is `whole-server` and `per-call`. Compared against
  *   `true`, so a missing flag (an older gateway) or a truthy string says nothing.
  * - `exception`: only on a `per-call` reach, which spares Crew's own servers.
@@ -122,6 +122,35 @@ export function mcpWholeServerDeny(
       : '',
     exception: probe.mcp?.per_tool_deny === 'per-call'
       ? i18nT('pages.developer.agentBackendTab.mcp_deny_exception', { name })
+      : '',
+  }
+}
+
+/**
+ * The same cost, worded for ONE server's open tool list.
+ *
+ * The gateway lists the servers its reach spares (`mcp.spared_servers`, read from
+ * the same `CONTROL_PLANE_SERVERS` tuple the codex and opencode mirrors use), so
+ * the list says only the fact that holds there: the rule on every other server,
+ * and "stops only that tool" on a spared one. The harness card keeps both
+ * sentences, since it describes the harness rather than one server.
+ *
+ * A gateway that predates the field sends no list, and then this is the pair
+ * `mcpWholeServerDeny` returns, as before: guessing which servers are spared
+ * from a name here would drift from the server's tuple.
+ */
+export function mcpServerDeny(
+  probe: AcpBackendProbe | undefined,
+  server: string,
+): { rule: string; exception: string } {
+  const pair = mcpWholeServerDeny(probe)
+  const spared = probe?.mcp?.spared_servers
+  if (!probe || !Array.isArray(spared)) return pair
+  if (!spared.includes(server)) return { rule: pair.rule, exception: '' }
+  return {
+    rule: '',
+    exception: pair.rule
+      ? i18nT('pages.overview.mcpTab.mcp_deny_spared', { name: acpBackendName(probe) })
       : '',
   }
 }

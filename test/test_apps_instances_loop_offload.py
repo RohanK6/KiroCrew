@@ -774,7 +774,7 @@ async def test_registries_config_write_holds_the_loop_side_config_lock(
     other. ``_write_registries_config`` reaches the file through
     ``update_config_locked``, which takes the sidecar advisory flock ONLY; the
     dashboard's legacy writers (agents endpoint, ``updates.py``, ``security.py``,
-    ``messaging.py``, ``mcp.py``, ``core.py`` STT) take ``_get_config_lock``
+    ``messaging.py``, ``mcp.py``, ``core_stt_settings.py`` STT) take ``_get_config_lock``
     ONLY. Dispatching this write with a bare ``asyncio.to_thread`` therefore
     holds nothing the legacy family respects, and a concurrent PUT there can
     commit a snapshot taken before this write and silently revert it.
@@ -833,7 +833,10 @@ def test_registries_config_write_is_not_dispatched_with_a_bare_to_thread() -> No
     is ``_write_registries_config`` itself.
     """
     offenders: list[str] = []
-    for owner, call in _calls_in_async_frames(_module_tree(routes_mod)):
+    family = (routes_mod, *(sys.modules[name] for name in routes_mod._OWNERS))
+    for owner, call in (
+        found for part in family for found in _calls_in_async_frames(_module_tree(part))
+    ):
         func = call.func
         is_to_thread = (
             isinstance(func, ast.Attribute)

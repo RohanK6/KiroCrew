@@ -72,7 +72,7 @@ _APP_OWNED_TOP_KEYS: frozenset = frozenset({"dev_fleet"})
 # Excluded only in the shape the reader keeps -- a JSON object -- so a scalar
 # written by hand keeps the one warning that says it is being ignored.
 #   * voice_reply -- the dashboard/Slack voice settings block. Written by
-#     slack/interactions.py (``data.setdefault("voice_reply", {})``) and
+#     slack/interactions_modals.py (``data.setdefault("voice_reply", {})``) and
 #     dashboard/chat_voice.py (persisted with json.dump), and read back on
 #     startup by slack/handler_runtime/voice.py::load_voice_reply_config
 #     (``cfg.raw.get("voice_reply")``), and also by
@@ -162,6 +162,16 @@ def _holds_nothing(value: object) -> bool:
     deprecation notice.
     """
     return value is None or (isinstance(value, (dict, list, str)) and not value)
+
+
+def _is_own_default(value: object, default: object) -> bool:
+    """True when a stored value is the field's own default.
+
+    Such a value behaves exactly as an absent key, so there is nothing for the
+    operator to migrate. A bool never equals a number here, so a deprecated
+    flag's ``False`` is not read as a numeric ``0`` default or the reverse.
+    """
+    return isinstance(value, bool) == isinstance(default, bool) and value == default
 
 
 def _get_help_text(schema: dict, dot_path: str) -> str:
@@ -603,7 +613,10 @@ def validate_config_data(data: dict) -> dict:
     # nothing (an empty map/list/string, or null) carries nothing for the
     # operator to migrate, so it is not announced: warning on bare presence would
     # scold an install whose earlier build materialized the key's empty default
-    # into every save, which the operator never wrote and cannot act on.
+    # into every save, which the operator never wrote and cannot act on. The
+    # same holds for a key holding the field's own default: the default-config
+    # writer serializes every field, so a config Kiro Crew has just created
+    # already carries it, and the loader would warn about its own write.
     for entry in SCHEMA_REGISTRY:
         if not entry.deprecated:
             continue
@@ -617,7 +630,7 @@ def validate_config_data(data: dict) -> dict:
             else:
                 found = False
                 break
-        if found and not _holds_nothing(node):
+        if found and not _holds_nothing(node) and not _is_own_default(node, entry.default_value):
             value_digest = hashlib.sha256(repr(node).encode("utf-8")).digest()
             warning_key = (entry.path, value_digest)
             with _DEPRECATED_WARNING_LOCK:
@@ -676,6 +689,12 @@ def validate_config_data(data: dict) -> dict:
                 custom_path=stt.get("custom_model_path", ""),
                 custom_sha256=stt.get("custom_model_sha256", ""),
             )
+        # `"auto"` is a documented spelling of 0, so it must become the int before
+        # the integer type check deletes it with a misleading "wrong type" notice.
+        if "threads" in stt:
+            from kiro_crew.config.sections import _validated_stt_threads
+
+            stt["threads"] = _validated_stt_threads(stt["threads"])
 
     # 3d. The harness fields have a product default distinct from their safety
     # floor. Absent or "" is "no choice" and takes the default, but a PRESENT
