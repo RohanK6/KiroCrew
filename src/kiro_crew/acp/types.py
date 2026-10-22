@@ -39,6 +39,7 @@ from kiro_crew.acp_backends import (  # noqa: F401 - re-exported for existing im
     ACP_BACKENDS_HOST_AUTH_CALLBACK,
     ACP_BACKENDS_INLINE_COMPACTION,
     ACP_BACKENDS_INTERNAL_SANDBOX,
+    ACP_BACKENDS_KIRO_FAMILY,
     ACP_BACKENDS_KIRO_SLASH_COMMANDS,
     ACP_BACKENDS_KNOWN,
     ACP_BACKENDS_LOAD_WITHOUT_MODES,
@@ -216,10 +217,11 @@ METHOD_KAS_CHECKPOINT_REVERT = "_kiro/checkpoint/revertMultiple"
 #: side -- the same evict-not-delete shape as kiro-cli's ``terminate``. A REQUEST,
 #: answered with ``{}``; sent as a notification the adapter ignores it and the
 #: session stays resident, which is the leak this verb exists to close. Also
-#: idempotent: closing an already-closed id answers ``{}`` again. Measured live
-#: against codex-acp 1.11.0; the gated test
+#: idempotent: closing an already-closed id answers ``{}`` again. Measured on
+#: codex-acp 1.11.0; the gated test
 #: ``test_codex_session_mcp.py::test_real_codex_acp_session_close_evicts`` re-runs
-#: that measurement on every install that has the adapter.
+#: that measurement on every install that has the adapter, and the lane pins
+#: its release in ``test/real_adapters/package.json``.
 METHOD_SESSION_CLOSE = "session/close"
 METHOD_COMPACTION_STATUS = "_kiro.dev/compaction/status"
 METHOD_CLEAR_STATUS = "_kiro.dev/clear/status"

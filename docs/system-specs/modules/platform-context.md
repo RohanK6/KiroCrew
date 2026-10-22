@@ -84,6 +84,7 @@ omit the policy.
 | `jail` | adapter | `DefaultJailProvider` (no-op, never jails) | enterprise process isolation |
 | `mobile_connect` | adapter | `DefaultMobileConnectProvider` (personal-install pair: `tailnet_qr` + `login_link` (id == kind by design)) | edition-specific phone-connection methods (descriptor-only `{id, kind}`; minting stays on each method's own endpoint; an empty list hides the dashboard entry; list + mint governed by `capabilities.mobile_connect`) |
 | `remote_provisioners` | adapter | `DefaultRemoteProvisionerProvider` (the built-in `aws_ec2` lane backed by `RealLaunchEngine`, **plus a conditional `aws_fargate` lane** backed by `FargateLaunchEngine` that is offered only when `cloud.json` carries a complete `fargate` block; id == kind by design for both) | edition-specific ways to CREATE a remote instance (a managed dev environment, a container task): descriptor-only `{id, kind, label, posix_only, step_labels, confirm_before_launch}` plus a `LaunchEngine` per id (`confirm_before_launch` carries what the operator must see and confirm before that lane may launch -- `POST /api/cloud/launch` requires `confirm_recipient` to equal it, so the requirement is derived from the row rather than hard-coded to one id, and a lane with nothing to confirm leaves it empty); the core's durable launch job still drives every launch, so cancel, rollback and orphan reaping are inherited rather than reimplemented |
+| `feedback` | adapter | `DefaultFeedbackTrackerProvider` (`report_issue_url()` → `None`) | the edition's issue tracker behind **Report a Problem** and `kirocrew doctor`. **REPLACE-capable** like `tips`: a supplied URL takes over from the public pre-filled GitHub bug-report link rather than being appended to it, because that link's query string is GitHub's form. The backend half of the dashboard's `setFeedbackTracker` seam (`website/docs/extension-seams.md` § "Feedback tracker"): the frontend-built links live there; this one is built by the gateway because it carries the bundle's facts |
 | `feature_apps` | tuple | **RESERVED** — `()`; apps register via `apps_loader` (provenance record only) | — (slot inert) |
 
 > `remote_provisioners` note — this seam lets the Set-up tab under Settings →
@@ -649,7 +650,7 @@ Wired sites:
   through the shared `redact_via_context` shim.
 - Credential redaction — all egress scrubs route through the single
   `kiro_crew.platform.redact_via_context` shim (the one canonical
-  fail-closed-aware shim; modules import it as `redact`). Covers: `agent.py`
+  fail-closed-aware shim; modules import it as `redact`). Covers: `agent_parts/spec_build.py`
   SEL-audit callers, `mcp_core_parts/` chat-history/crew output, `mcp_cron_vet.py`
   deny-reason + script-vet and `mcp_cron.py` timezone messages, and the file-content egress the
   `dashboard/handlers/files.py` facade serves (the outbox's slot append in
@@ -792,7 +793,7 @@ Wired sites:
   module-load time (only at call time). v1 method addition to the existing
   `CredentialPolicy` Protocol; no `CONTRACT_VERSION` bump; `DefaultCredentialPolicy`
   returns `frozenset()` so standalone redaction is byte-identical.
-- `agent.py` — `current_context().mcp_tooling.extra_mcp_servers()` merged
+- `agent_parts/spec_build.py` and `agent.py` — `current_context().mcp_tooling.extra_mcp_servers()` merged
   additively into the agent config build; the dynamic refresh also re-pins an
   existing entry's `command`/`args` and keeps its other keys.
 - `slack/events.py` / `slack/handler_runtime/dispatch.py` / `dashboard/handlers_system.py` —
@@ -1397,6 +1398,22 @@ is byte-identical) with no `CONTRACT_VERSION` bump.
   live foreign agent's servers are still in use. A registered source is read as an
   install of this product's own on-disk layout — a predecessor, a rename, or a
   fork. v1 addition; `Default` returns `[]`.
+- `FeedbackTrackerProvider.report_issue_url(bundle, note, *, prefill) -> Optional[str]`
+  — WIRED: `diagnostics._tracker_issue_url`, once per bundle for the dashboard's
+  `BundleResult.github_issue_url` (`prefill=True`) and once per `kirocrew doctor`
+  print (`terminal_issue_url`, `prefill=False`). `None` (the Default) keeps the
+  public pre-filled GitHub link byte-for-byte; a string REPLACES it. `prefill`
+  names the surface: the dashboard renders the URL from a JSON field no redactor
+  scans, while a terminal print crosses `redact_exfiltration_urls`, which
+  replaces any URL whose query is 200 characters or longer, so an edition keeps
+  that variant's query short. Read through `safe_context_call` (fallback `None`):
+  diagnostics catches `PlatformCompositionError`, logs a warning and returns an
+  empty issue link while keeping the bundle usable, without a standalone fallback.
+  `kirocrew doctor --bundle` prints the bundle path and explains why the link is
+  skipped. Any other error, a non-string or an empty string degrades to the public
+  link. The wire field keeps its `github_issue_url` name (a rename is a take-away
+  change). v1
+  addition; the second half of the frontend `setFeedbackTracker` seam.
 
 **`McpToolingProvider` is intentionally scoped to MCP tooling only** —
 `extra_mcp_servers()`, `extra_skills()`, and `extra_mcp_scopes()`. Agent

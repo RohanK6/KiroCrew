@@ -260,6 +260,7 @@
     "focus_mode_title_mac": "집중 모드 · ⌥⇧M",
     "connect_your_phone": "휴대폰 연결",
     "kiro_credit_usage_no_reading": "Kiro 크레딧 사용량 — 아직 잔액 정보 없음. 열어서 새로 고침",
+    "kiro_credit_usage_sign_in_type": "Kiro 크레딧 사용량 — 이 로그인에서는 잔액을 확인할 수 없습니다",
     "kiro_credit_usage_config_unreadable": "Kiro 크레딧 사용량 — 백엔드 설정을 읽을 수 없음. 열어서 다시 시도",
     "metrics_card_old_data": "마지막 업데이트 후 90초 이상 지났습니다",
     "metrics_card_fetch_failed": "마지막 메트릭 업데이트에 실패했습니다",
@@ -5959,6 +5960,7 @@
       "checking_credit_usage": "크레딧 사용량 확인 중",
       "credit_usage_api_key_auth": "API 키 인증에서는 크레딧 사용량을 확인할 수 없습니다",
       "credit_usage_no_reading": "이 계정의 잔액 정보를 아직 읽어오지 못했습니다.",
+      "credit_usage_sign_in_type": "이 {{provider}} 로그인에서는 크레딧 잔액이 표시되지 않습니다. kiro-cli가 로그인한 사용자를 알려 주지 않기 때문입니다.",
       "credit_usage_config_unreadable": "설정을 불러올 수 없어서 잔액을 표시할 수 없습니다.",
       "credit_usage_signin_required": "실시간 크레딧 사용량을 사용할 수 없습니다: 유효한 Kiro 로그인 자간 증명을 읽을 수 없어 무료 사용량 API를 호출하지 않았습니다. Kiro에 다시 로그인하세요(예: kiro-cli login 실행).",
       "credit_usage_unavailable": "잔액을 읽을 수 없습니다.",
@@ -7210,6 +7212,10 @@
       "install_kiro_cli_run_for_platform": "설치하려면 게이트웨이 호스트의 플랫폼에 맞는 명령을 실행하세요.",
       "install_command_macos_linux": "macOS 및 Linux(및 기타 Unix 계열 시스템)",
       "install_command_windows": "Windows (PowerShell에서 실행)",
+      "unzip_missing_install_first": "먼저 unzip을 설치하세요. 설치 프로그램에 필요하지만 게이트웨이 호스트에는 없습니다. 다음 명령 중 하나나 시스템의 패키지 관리자를 사용하세요.",
+      "unzip_command_debian_ubuntu": "Debian 또는 Ubuntu",
+      "unzip_command_fedora_rhel": "Fedora 또는 RHEL",
+      "install_kiro_cli_then_run_on_host": "그런 다음 {{platform}} 게이트웨이 호스트에서 다음을 실행해 Kiro CLI를 설치하세요.",
       "setup_intro": "<0>{{platform}} 게이트웨이 호스트</0>에서 코딩 에이전트를 실행하면 대시보드가 자동으로 열립니다.",
       "setup_intro_unknown_platform": "<0>게이트웨이 호스트</0>에서 코딩 에이전트를 실행하면 대시보드가 자동으로 열립니다.",
       "gateway_host": "게이트웨이 호스트",
@@ -7731,7 +7737,8 @@
       "hide_paste_preview": "붙여넣기 미리보기 숨기기",
       "show_paste_preview": "붙여넣기 미리보기 표시",
       "paste_lines_other": "[ 붙여넣기 #{{seq}} · {{count}}줄 ]",
-      "preview_more_lines_other": "… {{count}}줄 더"
+      "preview_more_lines_other": "… {{count}}줄 더",
+      "preview_gesture_hint": "두 번 클릭하여 전체 텍스트 삽입 · Backspace로 붙여넣기 제거"
     },
     "privacyChapter": {
       "continue": "계속",
@@ -7957,7 +7964,11 @@
       "this_authorizes_the_merge_as_soon_as_requirement": "이렇게 하면 요구 사항이 통과하는 즉시 병합이 승인되며, 이 저장소에서 허용하는 경우 스쿼시합니다 (허용하지 않으면 병합 커밋, 그다음 리베이스).",
       "this_authorizes_the_merge_when_the_pipeline_succ": "이렇게 하면 파이프라인이 성공할 때 병합이 승인됩니다.",
       "untitled_commit": "제목 없는 커밋",
-      "updated": "업데이트됨"
+      "updated": "업데이트됨",
+      "checks_failed_others_still_running": "검사 실패, 다른 검사는 아직 실행 중",
+      "checks_count_running_failed": "실행 중: {{running}} · 실패: {{failed}}",
+      "waiting_on_checks_detail": "검사가 아직 실행 중입니다. 필수 검사가 통과하고 필수 리뷰가 승인되면 병합할 수 있습니다.",
+      "checks_failed_still_running_detail": "검사 {{total}}개 중 실패 {{failed}}개, 실행 중 {{running}}개. 필수 검사가 통과하고 필수 리뷰가 승인될 때까지 병합할 수 없습니다."
     },
     "questionCard": {
       "custom_answer": "직접 입력한 답변",
@@ -8315,7 +8326,6 @@
       "desktop_app": "데스크톱 앱",
       "enable_shortcuts": "단축키 사용",
       "global_hotkey_hint": "앱이 백그라운드에 있어도 시스템 전체에서 작동합니다. 변경하거나 비활성화하려면 데스크톱 구성 파일에서 globalHotkey를 편집하세요 (Connection > Open Config File). 변경 사항은 앱을 다시 시작한 후 적용됩니다.",
-      "k": "K",
       "keyboard_shortcuts": "키보드 단축키",
       "keyboard_shortcuts_2": "키보드 단축키",
       "or": "또는",
@@ -11256,8 +11266,8 @@
         "context_from": "컨텍스트 출처",
         "off_record_marker": "사이드 채팅 · 대화에 저장되지 않습니다",
         "context_only_tools_unavailable": "읽기 전용 · 여기서는 조회만 가능하고 변경은 할 수 없습니다. 작업은 기본 채팅에서 요청하세요.",
-        "context_only_tools_unavailable_backend": "컨텍스트 전용 · 이 에이전트 백엔드에서는 여기서 도구를 사용할 수 없습니다. 작업은 기본 채팅에서 요청하세요.",
-        "context_only_claude_adapter_outdated": "컨텍스트 전용 · 여기서 읽기 전용 도구를 사용하려면 claude-agent-acp를 업데이트하세요. 작업은 기본 채팅에서 요청하세요.",
+        "context_only_tools_unavailable_backend": "조회 불가 · 이 에이전트 백엔드는 여기서 조회할 수 없어, 지금까지의 채팅 내용으로만 답합니다. 작업은 기본 채팅에서 요청하세요.",
+        "context_only_claude_adapter_outdated": "조회 불가 · 조회하려면 Claude Code 어댑터인 claude-agent-acp {{version}} 이상이 필요합니다. 작업은 기본 채팅에서 요청하세요. 업데이트하려면 실행: {{command}}",
         "context_only_config_unavailable": "에이전트 구성을 불러올 수 없어 사이드 채팅이 도구 없이 실행됩니다. 작업은 기본 채팅에서 요청하세요.",
         "context_only_tools_unknown": "이 에이전트 백엔드가 여기서 허용하는 도구를 확인할 수 없습니다. 작업은 기본 채팅에서 요청하세요.",
         "question_too_long": "질문이 너무 깁니다 — 약 {{max}} 글자 이내로 줄여 주세요 (현재: {{current}})",
@@ -14167,7 +14177,8 @@
         "sign_in_timeout": "로그인이 제시간에 승인 링크를 생성하지 못했습니다. 다시 시도하세요.",
         "temp_refusal_sealed": "선언된 {{key}}={{path}}이(가) 무시되었습니다. 이유: 읽기 전용 런타임 폴더 안에 있습니다. 프로브는 대신 관리되는 임시 폴더를 사용했습니다.",
         "temp_refusal_unclassifiable": "선언된 {{key}}={{path}}이(가) 무시되었습니다. 이유: 실제 위치를 확인할 수 없습니다. 프로브는 대신 관리되는 임시 폴더를 사용했습니다.",
-        "temp_refusal_check_failed": "선언된 {{key}}={{path}}이(가) 무시되었습니다. 이유: 위치 확인에 실패했습니다. 프로브는 대신 관리되는 임시 폴더를 사용했습니다."
+        "temp_refusal_check_failed": "선언된 {{key}}={{path}}이(가) 무시되었습니다. 이유: 위치 확인에 실패했습니다. 프로브는 대신 관리되는 임시 폴더를 사용했습니다.",
+        "mcp_deny_spared": "이 서버는 {{productName}}의 자체 서버이므로 {{name}}에서 여기의 도구 하나를 끄면 그 도구만 멈춥니다."
       },
       "memoryGraphTab": {
         "all_count": "전체 ({{count}})",
@@ -15286,6 +15297,8 @@
       "secrets_revoke_all": "모든 시크릿 회수",
       "secrets_revoke_all_confirm": "모두 철회하시겠습니까?",
       "retried_n_times_other": "{{count}}회 재시도했습니다",
+      "backing_off_after_n_failures_other": "{{time}}까지 대기 중 · {{count}}회 연속 실패",
+      "backoff_ends_on_success": "한 번 성공하면 대기가 끝납니다.",
       "jobs_table": "예약된 작업",
       "type_crewmate": "크루메이트",
       "filter_by_crewmate": "크루메이트로 필터",
@@ -17181,7 +17194,12 @@
         "backend_cpu_only": "CPU에서 실행 — 이 빌드에는 GPU가 없습니다",
         "last_recognition_value": "완성된 텍스트까지 {{duration}}, 오디오 길이의 {{rtf}}밍",
         "decode_threads_value": "디셈드 수 {{n}}",
-        "ptt_save_refused": "저장되지 않았습니다. 브라우저 저장 공간이 가득 찼습니다. 공간을 확보한 후 다시 시도하세요."
+        "ptt_save_refused": "저장되지 않았습니다. 브라우저 저장 공간이 가득 찼습니다. 공간을 확보한 후 다시 시도하세요.",
+        "decode_threads": "디코딩 스레드",
+        "decode_threads_desc": "로컬 모델이 음성 인식에 사용하는 CPU 스레드 수입니다. 자동은 이 컴퓨터 코어의 절반을 사용하며 최대 16개입니다. 남는 코어가 있는 큰 컴퓨터에서는 스레드를 늘리면 받아쓰기가 더 빨리 끝납니다. 변경 사항은 다음 받아쓰기부터 적용되며, 이때 모델을 한 번 다시 불러옵니다.",
+        "decode_threads_auto": "자동",
+        "decode_threads_auto_count": "자동({{n}})",
+        "decode_threads_env_override": "이 게이트웨이는 KIROCREW_STT_THREADS에 따라 스레드 {{value}}개를 사용합니다. 이 선택을 사용하려면 해당 변수를 제거하세요."
       },
       "teamsPanel": {
         "above_unlike_slack_the_bot_framework_has_no_outb": "위. Slack과 달리 Bot Framework에는\n 발신 전용 모드가 없습니다.",
@@ -18460,6 +18478,13 @@
       "goals_month_day_option": "{{day}}일",
       "goals_time": "점검 시간",
       "goals_checkin_off": "꺼짐",
+      "goals_heartbeat": "하트비트",
+      "goals_heartbeat_hint": "{{interval}}마다 스스로 할 일을 찾습니다",
+      "goals_heartbeat_every": "{{interval}}마다",
+      "goals_heartbeat_interval": "빈도",
+      "goals_heartbeat_credits": "깨어날 때마다 크레딧을 사용합니다.",
+      "goals_heartbeat_per_day_other": "하루 최대 {{count}}회",
+      "goals_heartbeat_on": "켜짐",
       "goals_reports": "보고서",
       "goals_reports_none": "아직 보고서가 없습니다.",
       "goals_add": "목표 추가",
@@ -19125,6 +19150,7 @@
     "sections_aria": "크루메이트 설정 섹션",
     "builtfrom_sections_aria": "기반 섹션",
     "memory_sections_aria": "메모리 섹션",
+    "section_locked_hint": "섹션을 전환하려면 초안을 저장하거나 삭제하세요.",
     "state_disabled_word": "비활성화됨",
     "switch_own_copy_title": "이 메이트 전용 복사본에서 전환할까요?",
     "switch_own_copy_body": "이 메이트는 전용 맞춤 복사본으로 만들어졌습니다. 다른 템플릿으로 바꾸면 그 복사본은 폐기되어 다시 선택할 수 없습니다."

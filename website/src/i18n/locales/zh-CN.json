@@ -260,6 +260,7 @@
     "focus_mode_title_mac": "专注模式 · ⌥⇧M",
     "connect_your_phone": "连接手机",
     "kiro_credit_usage_no_reading": "Kiro 额度用量 — 暂无余额读数；打开以刷新",
+    "kiro_credit_usage_sign_in_type": "Kiro 额度用量 — 此登录方式不支持显示余额",
     "kiro_credit_usage_config_unreadable": "Kiro 额度用量 — 无法读取后端设置；打开以重试",
     "metrics_card_old_data": "上次更新已超过 90 秒",
     "metrics_card_fetch_failed": "上次指标更新失败",
@@ -5656,6 +5657,7 @@
       "checking_credit_usage": "正在检查额度用量",
       "credit_usage_api_key_auth": "API 密钥认证方式下无法获取额度用量",
       "credit_usage_no_reading": "此账户暂时还没有可用的余额读数。",
+      "credit_usage_sign_in_type": "此 {{provider}} 登录不显示额度余额，因为 kiro-cli 不会报告当前登录的是哪位用户。",
       "credit_usage_config_unreadable": "无法加载设置，所以无法显示你的余额。",
       "credit_usage_signin_required": "无法获取实时额度用量：读取不到有效的 Kiro 登录凭据，因此根本没有调用免费的用量 API。请重新登录 Kiro（例如运行 kiro-cli login）以恢复。",
       "credit_usage_unavailable": "无法读取余额。",
@@ -7210,6 +7212,10 @@
       "install_kiro_cli_run_for_platform": "运行与网关主机平台对应的命令来安装。",
       "install_command_macos_linux": "macOS 和 Linux（以及其他类 Unix 系统）",
       "install_command_windows": "Windows（在 PowerShell 中运行）",
+      "unzip_missing_install_first": "首先安装 unzip。安装程序需要它，而网关主机上没有。使用以下任一命令或系统的包管理器安装。",
+      "unzip_command_debian_ubuntu": "Debian 或 Ubuntu",
+      "unzip_command_fedora_rhel": "Fedora 或 RHEL",
+      "install_kiro_cli_then_run_on_host": "然后在 {{platform}} 网关主机上运行以下命令来安装 Kiro CLI。",
       "setup_intro": "在<0>{{platform}} 网关主机</0>上运行一个编程代理，然后仪表板会自动打开。",
       "setup_intro_unknown_platform": "在<0>网关主机</0>上运行一个编程代理，然后仪表板会自动打开。",
       "gateway_host": "网关主机",
@@ -7731,7 +7737,8 @@
       "hide_paste_preview": "隐藏粘贴预览",
       "show_paste_preview": "显示粘贴预览",
       "paste_lines_other": "[ 粘贴 #{{seq}} · {{count}} 行 ]",
-      "preview_more_lines_other": "… 还有 {{count}} 行"
+      "preview_more_lines_other": "… 还有 {{count}} 行",
+      "preview_gesture_hint": "双击插入完整文本 · 按 Backspace 删除粘贴内容"
     },
     "privacyChapter": {
       "continue": "继续",
@@ -7957,7 +7964,11 @@
       "this_authorizes_the_merge_as_soon_as_requirement": "此操作会在要求通过后立即授权合并，若此仓库允许则压缩为单个提交（否则生成合并提交，再变基）。",
       "this_authorizes_the_merge_when_the_pipeline_succ": "此操作会在流水线成功后授权合并。",
       "untitled_commit": "无标题提交",
-      "updated": "已更新"
+      "updated": "已更新",
+      "checks_failed_others_still_running": "检查失败；其他检查仍在运行",
+      "checks_count_running_failed": "运行中：{{running}} · 失败：{{failed}}",
+      "waiting_on_checks_detail": "检查仍在运行。必需检查通过且必需审阅获批后即可合并。",
+      "checks_failed_still_running_detail": "共 {{total}} 项检查：失败 {{failed}} 项，仍在运行 {{running}} 项。必需检查通过且必需审阅获批前无法合并。"
     },
     "questionCard": {
       "custom_answer": "自定义回答",
@@ -8315,7 +8326,6 @@
       "desktop_app": "桌面应用",
       "enable_shortcuts": "启用快捷键",
       "global_hotkey_hint": "全局生效，即使应用在后台也可使用。如需修改或停用，请在桌面配置文件中编辑 globalHotkey（Connection > Open Config File），重启应用后生效。",
-      "k": "K",
       "keyboard_shortcuts": "键盘快捷键",
       "keyboard_shortcuts_2": "键盘快捷键",
       "or": "或",
@@ -11256,8 +11266,8 @@
         "context_from": "上下文来自",
         "off_record_marker": "随手问 · 不会保存到对话中",
         "context_only_tools_unavailable": "只读 · 这里可以查询信息，但不能做出更改。请在主对话中执行操作。",
-        "context_only_tools_unavailable_backend": "仅使用上下文 · 当前代理后端下这里无法使用工具。请在主对话中执行操作。",
-        "context_only_claude_adapter_outdated": "仅使用上下文 · 更新 claude-agent-acp 后，这里就能使用只读工具。请在主对话中执行操作。",
+        "context_only_tools_unavailable_backend": "无法查询 · 当前代理后端无法在这里查询信息，因此只根据目前的对话回答。请在主对话中执行操作。",
+        "context_only_claude_adapter_outdated": "无法查询 · 查询需要 claude-agent-acp {{version}} 或更新版本（Claude Code 的适配器）。请在主对话中执行操作。如需更新，请运行：{{command}}",
         "context_only_config_unavailable": "无法加载代理配置，因此侧边对话无法使用工具。请在主对话中执行操作。",
         "context_only_tools_unknown": "无法确认此代理后端在这里允许使用哪些工具。请在主对话中执行操作。",
         "question_too_long": "问题过长 — 请缩减到约 {{max}} 个字符以内（当前：{{current}}）",
@@ -14167,7 +14177,8 @@
         "sign_in_timeout": "登录未能及时生成批准链接。请重试。",
         "temp_refusal_sealed": "已忽略声明的 {{key}}={{path}}，原因：它位于只读的运行时文件夹内。探测改用了托管的临时文件夹。",
         "temp_refusal_unclassifiable": "已忽略声明的 {{key}}={{path}}，原因：无法确认它的实际位置。探测改用了托管的临时文件夹。",
-        "temp_refusal_check_failed": "已忽略声明的 {{key}}={{path}}，原因：位置检查失败。探测改用了托管的临时文件夹。"
+        "temp_refusal_check_failed": "已忽略声明的 {{key}}={{path}}，原因：位置检查失败。探测改用了托管的临时文件夹。",
+        "mcp_deny_spared": "这是 {{productName}} 自己的服务器，因此在 {{name}} 上关闭这里的一个工具只会停止该工具。"
       },
       "memoryGraphTab": {
         "all_count": "全部（{{count}}）",
@@ -15286,6 +15297,8 @@
       "secrets_revoke_all": "撤销全部密钥",
       "secrets_revoke_all_confirm": "撤销全部？",
       "retried_n_times_other": "已重试 {{count}} 次",
+      "backing_off_after_n_failures_other": "等待至 {{time}} · 连续失败 {{count}} 次",
+      "backoff_ends_on_success": "成功运行一次即可结束等待。",
       "jobs_table": "计划任务",
       "type_crewmate": "队友",
       "filter_by_crewmate": "按队友筛选",
@@ -17181,7 +17194,12 @@
         "backend_cpu_only": "在 CPU 上运行 — 此构建无 GPU",
         "last_recognition_value": "完成文本用时 {{duration}}，为音频时长的 {{rtf}} 倍",
         "decode_threads_value": "解码并发数 {{n}}",
-        "ptt_save_refused": "未保存：浏览器存储空间已满。请释放一些空间后重试。"
+        "ptt_save_refused": "未保存：浏览器存储空间已满。请释放一些空间后重试。",
+        "decode_threads": "解码并发数",
+        "decode_threads_desc": "本地模型识别语音时在 CPU 上使用的解码并发数。自动会使用本机一半的核心，最多 16 个。在有空闲核心的大型机器上，提高并发数能让每次听写更快完成。更改会在下一次听写时生效，届时会重新加载一次模型。",
+        "decode_threads_auto": "自动",
+        "decode_threads_auto_count": "自动（{{n}}）",
+        "decode_threads_env_override": "此网关使用的解码并发数为 {{value}}，由 KIROCREW_STT_THREADS 设定。删除该变量后才会使用此选择。"
       },
       "teamsPanel": {
         "above_unlike_slack_the_bot_framework_has_no_outb": "。与 Slack 不同，Bot Framework 没有\n              仅出站模式。",
@@ -18460,6 +18478,13 @@
       "goals_month_day_option": "{{day}} 号",
       "goals_time": "检查时间",
       "goals_checkin_off": "关闭",
+      "goals_heartbeat": "心跳",
+      "goals_heartbeat_hint": "每 {{interval}} 一次，自己找活干",
+      "goals_heartbeat_every": "每 {{interval}}",
+      "goals_heartbeat_interval": "频率",
+      "goals_heartbeat_credits": "每次唤醒都会消耗额度。",
+      "goals_heartbeat_per_day_other": "每天最多 {{count}} 次",
+      "goals_heartbeat_on": "开启",
       "goals_reports": "报告",
       "goals_reports_none": "还没有报告。",
       "goals_add": "添加目标",
@@ -19125,6 +19150,7 @@
     "sections_aria": "队友设置分区",
     "builtfrom_sections_aria": "构建来源分区",
     "memory_sections_aria": "记忆分区",
+    "section_locked_hint": "保存或放弃草稿后才能切换分区。",
     "state_disabled_word": "已禁用",
     "switch_own_copy_title": "要离开此伙伴的专属副本吗？",
     "switch_own_copy_body": "此伙伴基于其专属的定制副本。切换到其他模板会丢弃该副本——之后无法再次选择它。"

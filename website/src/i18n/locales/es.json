@@ -286,6 +286,7 @@
     "focus_mode_title_mac": "Modo de concentración · ⌥⇧M",
     "connect_your_phone": "Conectar tu teléfono",
     "kiro_credit_usage_no_reading": "Uso de créditos de Kiro — aún sin lectura del saldo; abre para actualizar",
+    "kiro_credit_usage_sign_in_type": "Uso de créditos de Kiro — el saldo no está disponible para este inicio de sesión",
     "kiro_credit_usage_config_unreadable": "Uso de créditos de Kiro — no se pudo leer el ajuste del backend; abre para reintentar",
     "metrics_card_old_data": "Última actualización hace más de 90 segundos",
     "metrics_card_fetch_failed": "La última actualización de métricas falló",
@@ -5858,6 +5859,7 @@
       "checking_credit_usage": "Comprobando el uso de créditos",
       "credit_usage_api_key_auth": "El uso de créditos no está disponible con la autenticación por clave de API",
       "credit_usage_no_reading": "Todavía no hay ninguna lectura del saldo para esta cuenta.",
+      "credit_usage_sign_in_type": "El saldo de créditos no se muestra para este inicio de sesión con {{provider}}, porque kiro-cli no indica qué usuario ha iniciado sesión.",
       "credit_usage_config_unreadable": "No se pudieron cargar los ajustes, así que no se puede mostrar tu saldo.",
       "credit_usage_signin_required": "El uso de créditos en vivo no está disponible: no se pudo leer ninguna credencial de inicio de sesión activa de Kiro, por lo que nunca se consultó la API gratuita de uso. Vuelve a iniciar sesión en Kiro (por ejemplo, ejecutando kiro-cli login) para restaurarlo.",
       "credit_usage_unavailable": "No se pudo leer tu saldo.",
@@ -7458,6 +7460,10 @@
       "install_kiro_cli_run_for_platform": "Ejecuta el comando correspondiente a la plataforma del host del gateway para instalarlo.",
       "install_command_macos_linux": "macOS y Linux (y otros sistemas tipo Unix)",
       "install_command_windows": "Windows (PowerShell)",
+      "unzip_missing_install_first": "Primero, instala unzip. El instalador lo necesita y el host del gateway no lo tiene. Usa uno de estos comandos o el gestor de paquetes de tu sistema.",
+      "unzip_command_debian_ubuntu": "Debian o Ubuntu",
+      "unzip_command_fedora_rhel": "Fedora o RHEL",
+      "install_kiro_cli_then_run_on_host": "Después, ejecuta esto en el host del gateway {{platform}} para instalar Kiro CLI.",
       "setup_intro": "Pon en marcha un agente de programación en el <0>host del gateway de {{platform}}</0> y el panel se abrirá automáticamente.",
       "setup_intro_unknown_platform": "Pon en marcha un agente de programación en el <0>host del gateway</0> y el panel se abrirá automáticamente.",
       "gateway_host": "Host del gateway",
@@ -7985,7 +7991,8 @@
       "paste_lines_other": "[ Pegado #{{seq}} · {{count}} líneas ]",
       "preview_more_lines_many": "… {{count}} líneas más",
       "preview_more_lines_one": "… {{count}} línea más",
-      "preview_more_lines_other": "… {{count}} líneas más"
+      "preview_more_lines_other": "… {{count}} líneas más",
+      "preview_gesture_hint": "Doble clic para insertar el texto completo · Retroceso quita lo pegado"
     },
     "privacyChapter": {
       "continue": "Continuar",
@@ -8217,7 +8224,11 @@
       "this_authorizes_the_merge_as_soon_as_requirement": "Esto autoriza la fusión en cuanto se cumplan los requisitos, con squash si este repositorio lo permite (si no, un commit de fusión y luego rebase).",
       "this_authorizes_the_merge_when_the_pipeline_succ": "Esto autoriza la fusión cuando el pipeline se complete correctamente.",
       "untitled_commit": "Commit sin título",
-      "updated": "Actualizado"
+      "updated": "Actualizado",
+      "checks_failed_others_still_running": "Comprobaciones fallidas; otras siguen en ejecución",
+      "checks_count_running_failed": "En ejecución: {{running}} · Fallidas: {{failed}}",
+      "waiting_on_checks_detail": "Todavía hay comprobaciones en ejecución. La fusión se desbloquea cuando pasen las comprobaciones obligatorias y se aprueben las revisiones requeridas.",
+      "checks_failed_still_running_detail": "De {{total}} comprobaciones: fallidas {{failed}}, aún en ejecución {{running}}. La fusión sigue bloqueada hasta que pasen las comprobaciones obligatorias y se aprueben las revisiones requeridas."
     },
     "questionCard": {
       "custom_answer": "Respuesta personalizada",
@@ -8585,7 +8596,6 @@
       "desktop_app": "Aplicación de escritorio",
       "enable_shortcuts": "Activar los atajos",
       "global_hotkey_hint": "Funciona en todo el sistema, incluso con la aplicación en segundo plano. Para cambiarlo o desactivarlo, edita globalHotkey en el archivo de configuración de la aplicación de escritorio (Connection > Open Config File); el cambio surte efecto al reiniciar la aplicación.",
-      "k": "K",
       "keyboard_shortcuts": "Atajos de teclado",
       "keyboard_shortcuts_2": "Atajos de teclado",
       "or": "o",
@@ -11586,8 +11596,8 @@
         "context_from": "Contexto de",
         "off_record_marker": "Chat lateral · no se guarda en la conversación",
         "context_only_tools_unavailable": "Solo lectura · Aquí se puede consultar información, pero no hacer cambios. Usa el chat principal para realizar acciones.",
-        "context_only_tools_unavailable_backend": "Solo contexto · Con este backend de agente, las herramientas no están disponibles aquí. Usa el chat principal para realizar acciones.",
-        "context_only_claude_adapter_outdated": "Solo contexto · Actualiza claude-agent-acp para usar aquí herramientas de solo lectura. Usa el chat principal para realizar acciones.",
+        "context_only_tools_unavailable_backend": "Sin consultas · Este backend de agente no puede hacer consultas aquí, así que se responde con lo que hay en el chat hasta ahora. Usa el chat principal para realizar acciones.",
+        "context_only_claude_adapter_outdated": "Sin consultas · Las consultas necesitan claude-agent-acp {{version}} o posterior, el adaptador de Claude Code. Usa el chat principal para realizar acciones. Para actualizar, ejecuta: {{command}}",
         "context_only_config_unavailable": "No se pudo cargar la configuración del agente, así que el chat lateral funciona sin herramientas. Usa el chat principal para realizar acciones.",
         "context_only_tools_unknown": "No se pudo comprobar qué herramientas permite aquí este backend de agente. Usa el chat principal para realizar acciones.",
         "question_too_long": "Pregunta demasiado larga — redúcela a menos de unos {{max}} caracteres (la tuya: {{current}})",
@@ -14627,7 +14637,8 @@
         "sign_in_timeout": "El inicio de sesión no produjo un enlace de aprobación a tiempo. Inténtalo de nuevo.",
         "temp_refusal_sealed": "Se ignoró el {{key}}={{path}} declarado porque está dentro de la carpeta de ejecución de solo lectura. La comprobación usó en su lugar la carpeta temporal gestionada.",
         "temp_refusal_unclassifiable": "Se ignoró el {{key}}={{path}} declarado porque no se pudo confirmar su ubicación real. La comprobación usó en su lugar la carpeta temporal gestionada.",
-        "temp_refusal_check_failed": "Se ignoró el {{key}}={{path}} declarado porque falló la comprobación de la ubicación. La comprobación usó en su lugar la carpeta temporal gestionada."
+        "temp_refusal_check_failed": "Se ignoró el {{key}}={{path}} declarado porque falló la comprobación de la ubicación. La comprobación usó en su lugar la carpeta temporal gestionada.",
+        "mcp_deny_spared": "Este es uno de los servidores propios de {{productName}}, así que en {{name}} desactivar una herramienta aquí detiene solo esa herramienta."
       },
       "memoryGraphTab": {
         "all_count": "Todos ({{count}})",
@@ -15800,6 +15811,10 @@
       "retried_n_times_many": "{{count}} reintentos",
       "retried_n_times_one": "{{count}} reintento",
       "retried_n_times_other": "{{count}} reintentos",
+      "backing_off_after_n_failures_many": "En espera hasta las {{time}} · {{count}} fallos seguidos",
+      "backing_off_after_n_failures_one": "En espera hasta las {{time}} · {{count}} fallo seguido",
+      "backing_off_after_n_failures_other": "En espera hasta las {{time}} · {{count}} fallos seguidos",
+      "backoff_ends_on_success": "Una ejecución correcta termina la espera.",
       "jobs_table": "Tareas programadas",
       "type_crewmate": "Compañero",
       "filter_by_crewmate": "Filtrar por compañero",
@@ -17721,7 +17736,12 @@
         "backend_cpu_only": "Se ejecuta en CPU: este build no tiene GPU",
         "last_recognition_value": "{{duration}} para el texto final, {{rtf}}× la duración del audio",
         "decode_threads_value": "{{n}} hilos de decodificación",
-        "ptt_save_refused": "No se guardó: el almacenamiento del navegador está lleno. Libera espacio e inténtalo de nuevo."
+        "ptt_save_refused": "No se guardó: el almacenamiento del navegador está lleno. Libera espacio e inténtalo de nuevo.",
+        "decode_threads": "Hilos de decodificación",
+        "decode_threads_desc": "Hilos de CPU que usa el modelo local para reconocer la voz. Automático usa la mitad de los núcleos de este equipo, como máximo 16. En un equipo grande con núcleos libres, más hilos terminan cada dictado antes. Un cambio se aplica en el siguiente dictado, que vuelve a cargar el modelo una vez.",
+        "decode_threads_auto": "Automático",
+        "decode_threads_auto_count": "Automático ({{n}})",
+        "decode_threads_env_override": "Esta puerta de enlace usa {{value}} hilos, fijados por KIROCREW_STT_THREADS. Elimina esa variable para usar esta opción."
       },
       "teamsPanel": {
         "above_unlike_slack_the_bot_framework_has_no_outb": "más arriba. A diferencia de Slack, el Bot Framework no tiene un modo solo de salida.",
@@ -19040,6 +19060,15 @@
       "goals_month_day_option": "Día {{day}}",
       "goals_time": "Hora del seguimiento",
       "goals_checkin_off": "Desactivado",
+      "goals_heartbeat": "Latido",
+      "goals_heartbeat_hint": "Cada {{interval}}, busca trabajo por su cuenta",
+      "goals_heartbeat_every": "Cada {{interval}}",
+      "goals_heartbeat_interval": "Frecuencia",
+      "goals_heartbeat_credits": "Cada activación usa créditos.",
+      "goals_heartbeat_per_day_one": "hasta {{count}} activación al día",
+      "goals_heartbeat_per_day_many": "hasta {{count}} de activaciones al día",
+      "goals_heartbeat_per_day_other": "hasta {{count}} activaciones al día",
+      "goals_heartbeat_on": "Activado",
       "goals_reports": "Informes",
       "goals_reports_none": "Aún no hay informes.",
       "goals_add": "Añadir un objetivo",
@@ -19707,6 +19736,7 @@
     "sections_aria": "Secciones de ajustes del compañero",
     "builtfrom_sections_aria": "Secciones de Basado en",
     "memory_sections_aria": "Secciones de Memoria",
+    "section_locked_hint": "Guarda o descarta tu borrador para cambiar de sección.",
     "state_disabled_word": "desactivado",
     "switch_own_copy_title": "¿Cambiar de la copia propia de este mate?",
     "switch_own_copy_body": "Este mate se basa en su propia copia personalizada. Cambiar a otra plantilla descarta esa copia: no se puede volver a seleccionar."

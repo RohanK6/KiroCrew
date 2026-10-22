@@ -273,6 +273,7 @@
     "focus_mode_title_mac": "ফোকাস মোড · ⌥⇧M",
     "connect_your_phone": "ফোন সংযুক্ত করুন",
     "kiro_credit_usage_no_reading": "Kiro ক্রেডিট ব্যবহার — এখনো কোনো ব্যালেন্স রিডিং নেই; রিফ্রেশ করতে খোলো",
+    "kiro_credit_usage_sign_in_type": "Kiro ক্রেডিট ব্যবহার — এই সাইন-ইনের জন্য ব্যালান্স পাওয়া যায় না",
     "kiro_credit_usage_config_unreadable": "Kiro ক্রেডিট ব্যবহার — ব্যাকএন্ড সেটিং পড়া যায়নি; আবার চেষ্টা করতে খোলো",
     "metrics_card_old_data": "শেষ আপডেট 90 সেকেন্ডের বেশি আগে",
     "metrics_card_fetch_failed": "শেষ মেট্রিক আপডেট ব্যর্থ হয়েছে",
@@ -5757,6 +5758,7 @@
       "checking_credit_usage": "ক্রেডিট ব্যবহার যাচাই করা হচ্ছে",
       "credit_usage_api_key_auth": "API কী প্রমাণীকরণের জন্য ক্রেডিট ব্যবহার পাওয়া যায় না",
       "credit_usage_no_reading": "এই অ্যাকাউন্টের জন্য এখনো কোনো ব্যালেন্স রিডিং পাওয়া যায়নি।",
+      "credit_usage_sign_in_type": "এই {{provider}} সাইন-ইনের জন্য ক্রেডিট ব্যালান্স দেখানো হয় না, কারণ kiro-cli জানায় না কোন ব্যবহারকারী সাইন ইন করেছে।",
       "credit_usage_config_unreadable": "সেটিংস লোড করা যায়নি, তাই তোমার ব্যালেন্স দেখানো যাচ্ছে না।",
       "credit_usage_signin_required": "লাইভ ক্রেডিট ব্যবহার পাওয়া যাে্ছনা: সক্রিয় কোনও Kiro সাইন-ইন ক্রেডেনশিয়াল পড়া যায়নি, তাই বিনামূল্যের ব্যবহার API-কে জিজ্ঞাসাই করা হয়নি। এটি ফিরিয়ে আনতে Kiro-তে আবার সাইন ইন করো (উদাহরণস্বরূপ kiro-cli login চালিয়ে)।",
       "credit_usage_unavailable": "তোমার ব্যালেন্স পড়া যায়নি।",
@@ -7334,6 +7336,10 @@
       "install_kiro_cli_run_for_platform": "ইনস্টল করতে গেটওয়ে হোস্টের প্ল্যাটফর্মের জন্য কমান্ডটি চালাও।",
       "install_command_macos_linux": "macOS ও Linux (এবং অন্য Unix-সদৃশ সিস্টেম)",
       "install_command_windows": "Windows (PowerShell-এ)",
+      "unzip_missing_install_first": "প্রথমে unzip ইনস্টল করো। ইনস্টলারের এটি দরকার, আর গেটওয়ে হোস্টে এটি নেই। এই কমান্ডগুলোর একটি বা তোমার সিস্টেমের প্যাকেজ ম্যানেজার ব্যবহার করো।",
+      "unzip_command_debian_ubuntu": "Debian বা Ubuntu",
+      "unzip_command_fedora_rhel": "Fedora বা RHEL",
+      "install_kiro_cli_then_run_on_host": "তারপর Kiro CLI ইনস্টল করতে {{platform}} গেটওয়ে হোস্টে এই কমান্ডটি চালাও।",
       "setup_intro": "<0>{{platform}} গেটওয়ে হোস্টে</0> একটি কোডিং এজেন্ট চালু করো, তারপর ড্যাশবোর্ড নিজে থেকেই খুলে যাবে।",
       "setup_intro_unknown_platform": "<0>গেটওয়ে হোস্টে</0> একটি কোডিং এজেন্ট চালু করো, তারপর ড্যাশবোর্ড নিজে থেকেই খুলে যাবে।",
       "gateway_host": "গেটওয়ে হোস্ট",
@@ -7858,7 +7864,8 @@
       "paste_lines_one": "[ পেস্ট #{{seq}} · {{count}} লাইন ]",
       "paste_lines_other": "[ পেস্ট #{{seq}} · {{count}} লাইন ]",
       "preview_more_lines_one": "… আরও {{count}} লাইন",
-      "preview_more_lines_other": "… আরও {{count}} লাইন"
+      "preview_more_lines_other": "… আরও {{count}} লাইন",
+      "preview_gesture_hint": "পুরো লেখা বসাতে ডাবল-ক্লিক করো · Backspace পেস্টটি সরায়"
     },
     "privacyChapter": {
       "continue": "চালিয়ে যান",
@@ -8087,7 +8094,11 @@
       "this_authorizes_the_merge_as_soon_as_requirement": "শর্তগুলো পাস হওয়ার সাথে সাথেই এটি মার্জের অনুমতি দেয়, আর এই রিপোজিটরি অনুমোদন করলে স্কোয়াশ করে (নাহলে একটি মার্জ কমিট, তারপর রিবেস)।",
       "this_authorizes_the_merge_when_the_pipeline_succ": "পাইপলাইন সফল হলে এটি মার্জের অনুমতি দেয়।",
       "untitled_commit": "শিরোনামহীন কমিট",
-      "updated": "আপডেট হয়েছে"
+      "updated": "আপডেট হয়েছে",
+      "checks_failed_others_still_running": "চেক ব্যর্থ; অন্যগুলো এখনও চলছে",
+      "checks_count_running_failed": "চলছে: {{running}} · ব্যর্থ: {{failed}}",
+      "waiting_on_checks_detail": "চেক এখনও চলছে। আবশ্যক চেক পাস করলে এবং আবশ্যক রিভিউ অনুমোদিত হলে মার্জ করা যাবে।",
+      "checks_failed_still_running_detail": "{{total}}টি চেকের মধ্যে: ব্যর্থ {{failed}}, এখনও চলছে {{running}}। আবশ্যক চেক পাস না করা এবং আবশ্যক রিভিউ অনুমোদিত না হওয়া পর্যন্ত মার্জ আটকে থাকবে।"
     },
     "questionCard": {
       "custom_answer": "কাস্টম উত্তর",
@@ -8450,7 +8461,6 @@
       "desktop_app": "ডেস্কটপ অ্যাপ",
       "enable_shortcuts": "শর্টকাট সক্রিয় করুন",
       "global_hotkey_hint": "সিস্টেম জুড়ে কাজ করে, অ্যাপ ব্যাকগ্রাউন্ডে থাকলেও। পরিবর্তন বা নিষ্ক্রিয় করতে, ডেস্কটপ কনফিগ ফাইলে globalHotkey সম্পাদনা করুন (Connection > Open Config File); অ্যাপ পুনরায় চালু হলে পরিবর্তন কার্যকর হয়।",
-      "k": "K",
       "keyboard_shortcuts": "কীবোর্ড শর্টকাট",
       "keyboard_shortcuts_2": "কীবোর্ড শর্টকাট",
       "or": "বা",
@@ -11421,8 +11431,8 @@
         "context_from": "কনটেক্সটের উৎস",
         "off_record_marker": "সাইড চ্যাট · কথোপকথনে সংরক্ষিত হয় না",
         "context_only_tools_unavailable": "শুধু পড়ার জন্য · এখানে তথ্য দেখা যায়, কিন্তু পরিবর্তন করা যায় না। কোনো কাজ করতে মূল চ্যাট ব্যবহার করুন।",
-        "context_only_tools_unavailable_backend": "শুধু প্রসঙ্গ · এই এজেন্ট ব্যাকএন্ডে এখানে টুল ব্যবহার করা যায় না। কোনো কাজ করতে মূল চ্যাট ব্যবহার করুন।",
-        "context_only_claude_adapter_outdated": "শুধু প্রসঙ্গ · এখানে শুধু পড়ার টুল ব্যবহার করতে claude-agent-acp আপডেট করো। কোনো কাজ করতে মূল চ্যাট ব্যবহার করো।",
+        "context_only_tools_unavailable_backend": "কোনো খোঁজ নেই · এই এজেন্ট ব্যাকএন্ড এখানে তথ্য খুঁজতে পারে না, তাই এ পর্যন্ত চ্যাটের ভিত্তিতে উত্তর দেয়। কোনো কাজ করতে মূল চ্যাট ব্যবহার করো।",
+        "context_only_claude_adapter_outdated": "কোনো খোঁজ নেই · তথ্য খুঁজতে claude-agent-acp {{version}} বা নতুন সংস্করণ লাগে, এটি Claude Code-এর অ্যাডাপ্টার। কোনো কাজ করতে মূল চ্যাট ব্যবহার করো। আপডেট করতে চালাও: {{command}}",
         "context_only_config_unavailable": "এজেন্ট কনফিগারেশন লোড করা যায়নি, তাই সাইড চ্যাট টুল ছাড়াই চলছে। কোনো কাজ করতে মূল চ্যাট ব্যবহার করুন।",
         "context_only_tools_unknown": "এই এজেন্ট ব্যাকএন্ড এখানে কোন টুল ব্যবহার করতে দেয় তা যাচাই করা যায়নি। কোনো কাজ করতে মূল চ্যাট ব্যবহার করো।",
         "question_too_long": "প্রশ্নটি খুব দীর্ঘ — প্রায় {{max}} অক্ষরের মধ্যে ছোট করো (তোমার: {{current}})",
@@ -14397,7 +14407,8 @@
         "sign_in_timeout": "সাইন-ইন সময়মতো অনুমোদনের লিঙ্ক তৈরি করতে পারেনি। আবার চেষ্টা করুন।",
         "temp_refusal_sealed": "ঘোষিত {{key}}={{path}} উপেক্ষা করা হয়েছে, কারণ এটি শুধু-পঠনযোগ্য রানটাইম ফোল্ডারের ভিতরে আছে। পরীক্ষাটি এর বদলে পরিচালিত অস্থায়ী ফোল্ডার ব্যবহার করেছে।",
         "temp_refusal_unclassifiable": "ঘোষিত {{key}}={{path}} উপেক্ষা করা হয়েছে, কারণ এর আসল অবস্থান নিশ্চিত করা যায়নি। পরীক্ষাটি এর বদলে পরিচালিত অস্থায়ী ফোল্ডার ব্যবহার করেছে।",
-        "temp_refusal_check_failed": "ঘোষিত {{key}}={{path}} উপেক্ষা করা হয়েছে, কারণ অবস্থান যাচাই ব্যর্থ হয়েছে। পরীক্ষাটি এর বদলে পরিচালিত অস্থায়ী ফোল্ডার ব্যবহার করেছে।"
+        "temp_refusal_check_failed": "ঘোষিত {{key}}={{path}} উপেক্ষা করা হয়েছে, কারণ অবস্থান যাচাই ব্যর্থ হয়েছে। পরীক্ষাটি এর বদলে পরিচালিত অস্থায়ী ফোল্ডার ব্যবহার করেছে।",
+        "mcp_deny_spared": "এটি {{productName}}-এর নিজের সার্ভার, তাই {{name}}-এ এখানে একটি টুল বন্ধ করলে শুধু সেই টুলটিই থামে।"
       },
       "memoryGraphTab": {
         "all_count": "সব ({{count}})",
@@ -15543,6 +15554,9 @@
       "secrets_revoke_all_confirm": "সব প্রত্যাহার করবেন?",
       "retried_n_times_one": "{{count}} বার পুনরায় চেষ্টা করা হয়েছে",
       "retried_n_times_other": "{{count}} বার পুনরায় চেষ্টা করা হয়েছে",
+      "backing_off_after_n_failures_one": "{{time}} পর্যন্ত বিরতি · পরপর {{count}}টি ব্যর্থতা",
+      "backing_off_after_n_failures_other": "{{time}} পর্যন্ত বিরতি · পরপর {{count}}টি ব্যর্থতা",
+      "backoff_ends_on_success": "একটি সফল রান বিরতি শেষ করে।",
       "jobs_table": "নির্ধারিত জব",
       "type_crewmate": "ক্রুমেট",
       "filter_by_crewmate": "ক্রুমেট অনুযায়ী ফিল্টার",
@@ -17451,7 +17465,12 @@
         "backend_cpu_only": "CPU-তে চলে — এই বিল্ডে GPU নেই",
         "last_recognition_value": "সম্পূর্ণ লেখা পর্যন্ত {{duration}}, অদিও দৈর্ঘ্যের {{rtf}}×",
         "decode_threads_value": "{{n}} ডিকোড থ্রেড",
-        "ptt_save_refused": "সংরক্ষিত হয়নি: ব্রাউজারের স্টোরেজ পূর্ণ। কিছু জায়গা খালি করে আবার চেষ্টা করো।"
+        "ptt_save_refused": "সংরক্ষিত হয়নি: ব্রাউজারের স্টোরেজ পূর্ণ। কিছু জায়গা খালি করে আবার চেষ্টা করো।",
+        "decode_threads": "ডিকোড থ্রেড",
+        "decode_threads_desc": "স্থানীয় মডেল কথা চিনতে যতগুলো CPU থ্রেড ব্যবহার করে। অটো এই মেশিনের অর্ধেক কোর ব্যবহার করে, সর্বোচ্চ 16টি। খালি কোর থাকা বড় মেশিনে বেশি থ্রেড প্রতিটি ডিক্টেশন দ্রুত শেষ করে। পরিবর্তন পরের ডিক্টেশনে কার্যকর হয়, তখন মডেল একবার আবার লোড হয়।",
+        "decode_threads_auto": "অটো",
+        "decode_threads_auto_count": "অটো ({{n}})",
+        "decode_threads_env_override": "এই গেটওয়ে {{value}}টি থ্রেড ব্যবহার করে, যা KIROCREW_STT_THREADS নির্ধারণ করে। এই পছন্দটি ব্যবহার করতে ভেরিয়েবলটি সরান।"
       },
       "teamsPanel": {
         "above_unlike_slack_the_bot_framework_has_no_outb": "উপরে। Slack-এর বিপরীতে, Bot Framework-এ কোনো\n              শুধু-আউটবাউন্ড মোড নেই।",
@@ -18750,6 +18769,14 @@
       "goals_month_day_option": "{{day}} তারিখ",
       "goals_time": "পর্যালোচনার সময়",
       "goals_checkin_off": "বন্ধ",
+      "goals_heartbeat": "হার্টবিট",
+      "goals_heartbeat_hint": "প্রতি {{interval}}, নিজেই কাজ খুঁজে নেয়",
+      "goals_heartbeat_every": "প্রতি {{interval}}",
+      "goals_heartbeat_interval": "কত ঘন ঘন",
+      "goals_heartbeat_credits": "প্রতিবার জাগলে ক্রেডিট খরচ হয়।",
+      "goals_heartbeat_per_day_one": "দিনে সর্বোচ্চ {{count}}টি জাগরণ",
+      "goals_heartbeat_per_day_other": "দিনে সর্বোচ্চ {{count}}টি জাগরণ",
+      "goals_heartbeat_on": "চালু",
       "goals_reports": "রিপোর্ট",
       "goals_reports_none": "এখনও কোনো রিপোর্ট নেই।",
       "goals_add": "লক্ষ্য যোগ করো",
@@ -19416,6 +19443,7 @@
     "sections_aria": "ক্রুমেট সেটিং বিভাগ",
     "builtfrom_sections_aria": "যার উপর ভিত্তি করে বিভাগ",
     "memory_sections_aria": "মেমরি বিভাগ",
+    "section_locked_hint": "সেকশন পরিবর্তন করতে তোমার খসড়া সংরক্ষণ করো বা বাতিল করো।",
     "state_disabled_word": "নিষ্ক্রিয়",
     "switch_own_copy_title": "এই মেটের নিজের কপি থেকে সরে যাবে?",
     "switch_own_copy_body": "এই মেট তার নিজের কাস্টমাইজ করা কপি থেকে তৈরি। অন্য টেমপ্লেটে স্যুইচ করলে সেই কপিটি বাদ পড়ে যায় — সেটি আর বেছে নেওয়া যায় না।"

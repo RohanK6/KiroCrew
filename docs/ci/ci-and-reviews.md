@@ -68,6 +68,7 @@ pull_request
   |-- issue-gate.yml    "Issue Gate"   PR names a sized issue, blocking once enabled (paused)
   |-- dependency-review.yml            license allowlist
   |-- pr-scope.yml      "PR Scope"     PR breadth across areas, advisory
+  |-- pr-size.yml       "PR Size"      file count and hours open; owner approval at 80 files (shadow)
   |-- cross-platform.yml
   |                     "Cross-Platform Portability"  added-line POSIX-only scan, blocking
   |-- docker-smoke.yml                 container contract (paths-filtered)
@@ -347,6 +348,14 @@ Out-of-band lanes that never gate a PR:
   `deferred-finding` issue; it is advisory because a comment event cannot gate a
   PR. `deferred-findings-audit.yml` runs weekly and bumps every open
   `deferred-finding` issue past its due date.
+- **Override audit:** the weekly `fix-loop-analysis.yml` metrics job
+  (`.github/scripts/fix_loop_metrics.py`) counts the `/ai-review override` records the
+  handler posted in the window, from bot-authored comments only: `overrides_total`,
+  `overrides_by_class`, `overrides_self_authored` (the PR author recorded it on their own
+  PR), `overrides_deferred_without_issue` and `owner_decisions` (each one listed with its
+  PR and actor). A record from before classes existed counts as `unclassified` and the old
+  command as `legacy`. The numbers are in the report's table and in `metrics.json`; the
+  model narrates them and judges none of them.
 
 ### Scheduled workflows: failure surfacing
 
@@ -556,6 +565,12 @@ pushes whose red jobs included a lint job.
   cancelled, `lint-gate` is SKIPPED, not failed: the lint job is the red check and
   the heavy jobs skip behind `lint-gate` exactly as they skip behind a red
   `await-fast-gate`.
+- **A skipped lint job does not skip the heavy jobs.** Each job behind `lint-gate`
+  carries `if: !cancelled() && needs.lint-gate.result == 'success'` (ANDed with
+  its own condition), and `coverage-combine` names each shard's success the same
+  way. Without it GitHub's implicit `success()` reads every ancestor, so the lint
+  job skipped on a backend-only or frontend-only diff skipped every shard behind
+  a green `lint-gate`, and Coverage Gate failed closed.
 - **Coverage Gate names lint.** It fails closed on skipped shards, and now reads
   `backend-lint` and `frontend-lint` first: when either failed or was cancelled it
   fails with "lint did not pass ... Fix 'Backend Lint & Type Check' / 'Frontend Lint
@@ -994,8 +1009,8 @@ Where the coverage went:
 
 | Lane | Where | Blocking? |
 |---|---|---|
-| `backend-test-macos` (full suite, 4 shards) | `platform-tests.yml`: called by `nightly.yml` at 06:00 UTC, plus `workflow_dispatch` against any branch | Holds the nightly **publish** jobs, never the builds — the artifacts are the evidence a fixer works from. Maintains one tracking issue (`platform-tests-macos` label) carrying the failing node ids and the pull requests merged in the last 24h |
-| The same suite, on demand | `macos-on-demand.yml`, `pull_request`, calls `platform-tests.yml` against the PR head; a Linux `decide` job runs it when the diff touches a darwin-sensitive path, **or** the PR carries the `ci:macos` label, **or** the head SHA falls in a 1-in-50 sample (`16#${HEAD_SHA:0:8} % 50`, deterministic per commit) (acts immediately -- the workflow listens for `labeled`), **or** an added line in a `*.py`/`*.sh` file uses a Linux-only primitive (`LINUX_ONLY_PRIMITIVES` on the verdict step: `/proc/`, GNU `stat -c`, `O_PATH`, `RLIMIT_AS`, `surrogateescape`), wherever the file lives; an unreadable diff leaves that switch off with a warning. Over those four sits a CEILING: the path, sample and content switches are refused while this lane already holds `LANE_MAX_LIVE_RUNS` (4) live runs of the hosted macOS pool (a run holds one job per shard, so the ceiling is expressed in runs but felt in jobs, and it moves with the shard count), because an uncapped lane can hold nearly every in-progress hosted macOS job, leaving its own shards waiting many hours for a runner while `build.yml` and `release.yml` queue behind it. A capped run is skipped, not queued, so the ceiling bounds demand and settles the lane at about six verdicts an hour -- a timely verdict for a few pull requests instead of a many-hour one for all of them, with the nightly still covering every merge. The `ci:macos` label is never refused, and neither is a re-run, so a retry cannot turn a red lane into a skip. A fork pull request gets only the label switch: the path, sample and content switches are off for a fork head, and the nightly covers it after merge | Advisory. It is a separate workflow ON PURPOSE: a macOS job inside `ci.yml` holds that workflow's completion even with `continue-on-error`, so it would still hold readiness. Readiness evaluates neither this workflow nor its check |
+| `backend-test-macos` (full suite, 5 shards, 4 at a time) | `platform-tests.yml`: called by `nightly.yml` at 06:00 UTC, plus `workflow_dispatch` against any branch | Holds the nightly **publish** jobs, never the builds — the artifacts are the evidence a fixer works from. Maintains one tracking issue (`platform-tests-macos` label) carrying the failing node ids and the pull requests merged in the last 24h |
+| The same suite, on demand | `macos-on-demand.yml`, `pull_request`, calls `platform-tests.yml` against the PR head; a Linux `decide` job runs it when the diff touches a darwin-sensitive path, **or** the PR carries the `ci:macos` label, **or** the head SHA falls in a 1-in-50 sample (`16#${HEAD_SHA:0:8} % 50`, deterministic per commit) (acts immediately -- the workflow listens for `labeled`), **or** an added line in a `*.py`/`*.sh` file uses a Linux-only primitive (`LINUX_ONLY_PRIMITIVES` on the verdict step: `/proc/`, GNU `stat -c`, `O_PATH`, `RLIMIT_AS`, `surrogateescape`), wherever the file lives; an unreadable diff leaves that switch off with a warning. Over those four sits a CEILING: the path, sample and content switches are refused while this lane already holds `LANE_MAX_LIVE_RUNS` (4) live runs of the hosted macOS pool (a run holds one job per shard it has running at once, `min(SHARD_COUNT, max-parallel)`, so the ceiling is expressed in runs but felt in jobs: 4 runs x min(5, 4) = 16 of the calibrated 18, and it moves with either factor), because an uncapped lane can hold nearly every in-progress hosted macOS job, leaving its own shards waiting many hours for a runner while `build.yml` and `release.yml` queue behind it. A capped run is skipped, not queued, so the ceiling bounds demand; 5 shards at max-parallel 4 run in two shard-waves, about 52 minutes a suite against about 27 for one wave, which settles the lane at about four or five verdicts an hour -- a timely verdict for a few pull requests instead of a many-hour one for all of them, with the nightly still covering every merge. The `ci:macos` label is never refused, and neither is a re-run, so a retry cannot turn a red lane into a skip. A fork pull request gets only the label switch: the path, sample and content switches are off for a fork head, and the nightly covers it after merge | Advisory. It is a separate workflow ON PURPOSE: a macOS job inside `ci.yml` holds that workflow's completion even with `continue-on-error`, so it would still hold readiness. Readiness evaluates neither this workflow nor its check |
 | Real gateway boot on macOS | `ci.yml`'s `e2e-boot-matrix`, the only job on the push-to-main path; `nightly.yml`'s `pod-scenarios` | Blocking on main / holds nothing in the nightly |
 
 `test/test_macos_platform_tests_gate.py` pins all of it, including the property that
@@ -1962,6 +1977,58 @@ revert; an issue-side revalidation lane (a reverse index from issue to the open
 PRs declaring it, plus a write path to re-dispatch their gate runs) would exist for
 this path alone and is not built.
 
+## `pr-size.yml`: very wide or long-open pull requests (SHADOW)
+
+A pull request that touches very many files, or stays open a week, is the one that
+loops on rebases. Over 1,980 studied pull requests, `files >= 80 or open >= 168 h`
+flags 3.3% of them and holds 26.9% of the rebase loops. Lines are not used: of the
+106 pull requests with 5,000 or more lines that merged fast, 94 are splits. The
+numbers and the decision are in
+[the RFC](../request-for-change/rfc-review-loop-and-escaped-bug-reduction.md), D6.
+
+| Level | Rule | Effect |
+|---|---|---|
+| Hint | 50 or more files | a notice; locally `diff_signals.py` prints `! SIZE` |
+| Stop | 80 or more files | red once enforced, until an owner approves |
+| Age | 168 h open | a notice; never red, because a wait for review is not the author's fault |
+
+The numbers are named constants in `.github/scripts/pr_size.py`
+(`FILES_HINT`, `FILES_STOP`, `HOURS_AGING`), repeated in `diff_signals.py` and kept
+equal by `test/test_prepare_pr_diff_signals_size.py`.
+
+**Shadow.** `PR_SIZE_ENFORCED` in `pr_size.py` is `False`. The `PR Size` job never
+fails: at the stop level it prints a warning that says "this would be red" and
+names the approval command. The rollout is shadow first, then red after about 14
+days of reading that list. To enforce, set the constant to `True`, delete the
+bootstrap guard in `pr-size.yml` (a test requires that), and add `PR Size` to the
+lane list in `pr-readiness.yml` so a red reds the one required status. An
+unreadable pull request is a warning in shadow and a red check when enforced.
+
+**The owner override.** A comment whose first line is
+`/pr-size approve: <reason, 12 to 500 characters>` on the pull request.
+`pr-size-override.yml` runs from the default branch on `issue_comment`, reads the
+commenter's collaborator permission with the same three tries and fail-closed rule as
+`ai-review-human-override.yml`, and accepts `admin`, `maintain` or `write`. The
+author of the pull request may approve only as an `admin`. A pull request under 80
+files has nothing to approve. The handler posts a bot comment whose first line is a
+hidden marker, `<!-- pr-size-override actor=<login> files=<n> head=<sha> source=<id>
+at=<time> -->`, with the quoted reason, then re-runs the `PR Size` run for that head.
+The check reads a marker only from a comment by `github-actions[bot]`, so a marker
+typed by hand does nothing. The comment body reaches the script through the
+environment only, never inside a `run:` expression.
+
+An approval holds while the file count stays at or below the recorded count plus 25%
+plus 10 (approved at 90 covers 122). More than that needs a new decision. Every
+approved run prints a warning naming who approved and at how many files, and the
+bot comment is the permanent record. A run of approvals means the limit needs
+retuning.
+
+**What it does not do.** It does not touch `PR Scope` (`pr-scope.yml`), which stays
+advisory and judges whether changes are related; this one counts files. It adds no
+labels or comments of its own. The measure is one `GET pulls/<n>` per run, and one
+comment listing only at the stop level. The job checks out the default branch, never
+the pull request's code.
+
 ## `code-review.yml`: the deterministic pre-gate
 
 No model, no secrets, so it is safe on forks and always runs. It is the grep-half
@@ -2029,9 +2096,12 @@ unvetted dependency cannot ride in on a stale override.
 
 **`docker-smoke.yml`** is paths-filtered to the container surface (`docker/**` plus
 the source files the container contract spans: the bind override in
-`dashboard/origin.py`, the probe Host-barrier exemption that both chains in
-`dashboard/server.py` build from `dashboard/server_runtime/security_middleware.py`
-(the filter takes `src/kiro_crew/dashboard/server_runtime/**` with `server.py`),
+`dashboard/origin.py`, the probe Host-barrier exemption that both chains build
+from `dashboard/server_runtime/security_middleware.py`, the dashboard's in
+`dashboard/server.py` and the headless one in
+`dashboard/server_runtime/api_entrypoint.py` (the filter takes
+`src/kiro_crew/dashboard/server_runtime/**` and `src/kiro_crew/dashboard/server_*.py`
+with `server.py`),
 and the liveness payload in `dashboard/handlers/core.py`). It builds the image from
 a locally-built wheel and proves, across a real container boundary, that
 `KIROCREW_BIND=0.0.0.0` makes the gateway reachable from the host, that token auth
